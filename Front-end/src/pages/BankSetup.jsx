@@ -3,13 +3,15 @@ import { useAuth } from '../context/AuthContext';
 import { bankAPI } from '../services/api';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { FaWallet, FaUniversity, FaKey, FaPlus, FaMoneyBillWave } from 'react-icons/fa';
+import { FaWallet, FaUniversity, FaKey, FaPlus, FaMoneyBillWave, FaArrowUp, FaArrowDown, FaClock, FaCheckCircle, FaSpinner } from 'react-icons/fa';
 
 const BankSetup = () => {
   const { user, updateUser } = useAuth();
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [showAddBalance, setShowAddBalance] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [transactions, setTransactions] = useState([]);
+  const [transactionsLoading, setTransactionsLoading] = useState(true);
 
   const [accountData, setAccountData] = useState({
     accountNumber: '',
@@ -25,7 +27,19 @@ const BankSetup = () => {
     if (!user?.accountNumber) {
       setShowAddAccount(true);
     }
+    fetchTransactions();
   }, [user]);
+
+  const fetchTransactions = async () => {
+    try {
+      const response = await bankAPI.getTransactions();
+      setTransactions(response.data.data || []);
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+    } finally {
+      setTransactionsLoading(false);
+    }
+  };
 
   const handleAddAccount = async (e) => {
     e.preventDefault();
@@ -60,6 +74,8 @@ const BankSetup = () => {
       toast.success('Balance added successfully!');
       setShowAddBalance(false);
       setBalanceData({ balance: '', secretKey: '' });
+      // Refresh transactions to show the new balance addition
+      fetchTransactions();
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to add balance');
     } finally {
@@ -274,15 +290,102 @@ const BankSetup = () => {
           </div>
         )}
 
-        {/* Transaction History Placeholder */}
+        {/* Transaction History */}
         <div className="card">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
+            <FaClock className="mr-3 text-primary-500" />
             Recent Transactions
           </h2>
-          <div className="text-center py-12 text-gray-500">
-            <FaWallet className="text-6xl mx-auto mb-4 opacity-20" />
-            <p>No transactions yet</p>
-          </div>
+          
+          {transactionsLoading ? (
+            <div className="text-center py-12">
+              <FaSpinner className="animate-spin text-5xl text-primary-500 mx-auto mb-4" />
+              <p className="text-gray-500">Loading transactions...</p>
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <FaWallet className="text-6xl mx-auto mb-4 opacity-20" />
+              <p>No transactions yet</p>
+              <p className="text-sm mt-2">Your transaction history will appear here</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {transactions.map((transaction) => {
+                const isReceived = transaction.toUserID === user?._id;
+                const isSent = transaction.fromUserID === user?._id;
+                const otherUserName = isReceived ? transaction.fromUserName : transaction.toUserName;
+                const otherUserEmail = isReceived ? transaction.fromUserEmail : transaction.toUserEmail;
+                
+                return (
+                  <div 
+                    key={transaction._id} 
+                    className={`p-4 rounded-lg border-2 transition-all hover:shadow-md ${
+                      isReceived 
+                        ? 'bg-green-50 border-green-200 hover:border-green-300' 
+                        : 'bg-red-50 border-red-200 hover:border-red-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center mb-2">
+                          <div className={`p-2 rounded-full mr-3 ${
+                            isReceived ? 'bg-green-100' : 'bg-red-100'
+                          }`}>
+                            {isReceived ? (
+                              <FaArrowDown className="text-green-600 text-xl" />
+                            ) : (
+                              <FaArrowUp className="text-red-600 text-xl" />
+                            )}
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-gray-900">
+                              {isReceived ? 'Received from' : 'Sent to'} {otherUserName}
+                            </h3>
+                            <p className="text-xs text-gray-500">{otherUserEmail}</p>
+                          </div>
+                        </div>
+                        
+                        {transaction.description && (
+                          <p className="text-sm text-gray-600 ml-14 mb-2">
+                            {transaction.description}
+                          </p>
+                        )}
+                        
+                        <div className="flex items-center text-xs text-gray-500 ml-14 space-x-4">
+                          <span className="flex items-center">
+                            <FaClock className="mr-1" />
+                            {new Date(transaction.transactionTime).toLocaleString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                          <span className={`flex items-center font-semibold ${
+                            transaction.status === 'success' 
+                              ? 'text-green-600' 
+                              : 'text-yellow-600'
+                          }`}>
+                            <FaCheckCircle className="mr-1" />
+                            {transaction.status.charAt(0).toUpperCase() + transaction.status.slice(1)}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <p className={`text-2xl font-bold ${
+                          isReceived ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {isReceived ? '+' : '-'}৳{transaction.amount}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </Layout>

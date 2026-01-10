@@ -1,4 +1,5 @@
 import { User } from "../Models/User.Model.js";
+import { Bank } from "../Models/bank.model.js";
 import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { AsynHandler } from "../Utils/AsyncHandler.js";
@@ -304,6 +305,30 @@ const addBalance=AsynHandler(async(req,res)=>{
     )
 })
 
+const getTransactions=AsynHandler(async(req,res)=>{
+    const userID=req.user?._id;
+    
+    if(!userID){
+        throw new ApiError(401,"User not authenticated");
+    }
+    
+    // Find all transactions where user is either sender or receiver
+    const transactions=await Bank.find({
+        $or:[
+            {fromUserID:userID},
+            {toUserID:userID}
+        ]
+    }).sort({transactionTime:-1}); // Sort by newest first
+    
+    console.log(`Fetched ${transactions.length} transactions for user`);
+    
+    return res
+    .status(200)
+    .json(
+        new ApiResponse(200,transactions,"Transactions fetched successfully")
+    )
+})
+
 export {
     Register,
     LogIn,
@@ -313,5 +338,6 @@ export {
     UpdateProfilePic,
     GetUserPublicProfile,
     addBankAccount,
-    addBalance
+    addBalance,
+    getTransactions
 }

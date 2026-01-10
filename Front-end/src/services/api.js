@@ -76,6 +76,7 @@ export const authAPI = {
 export const bankAPI = {
   addBankAccount: (data) => api.post('/users/addbankaccount', data),
   addBalance: (data) => api.post('/users/addBalance', data),
+  getTransactions: () => api.get('/users/transactions'),
 };
 
 // Course APIs
