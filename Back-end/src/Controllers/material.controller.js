@@ -119,18 +119,32 @@ const addMaterial=AsynHandler(async(req,res)=>{
    if(admin.Role==="admin" && user.Role!=="admin"){
         const payment=100;
         
+        // Check if admin has sufficient balance
+        if(admin.balance < payment){
+          throw new ApiError(401,"Admin has insufficient balance to pay instructor");
+        }
+        
         const bank=new transaction(admin._id,req.user?._id,payment,`salary for content upload : ${course.title} `)
         const txn=await bank.tnx();
+        
+        // Deduct from admin's balance
+        admin.balance=Number(admin.balance)-Number(payment);
+        await admin.save({validateBeforeSave:false});
+        
+        // Add to teacher's balance
         user.balance=Number(user.balance)+payment;
         await user.save({validateBeforeSave:false});
         console.log("teacher payment for content upload succesfully");
 
 
    }
+   
+   // Return material with updated user data for balance refresh
+   const updatedUser=await User.findById(req.user?._id).select("-Password -RefreshToken -secretKey");
    return res
    .status(201)
    .json(
-    new ApiResponse(201,material,"content uploaded succesfully")
+    new ApiResponse(201,{material,user:updatedUser},"content uploaded succesfully")
    )
 })
 

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { courseAPI, materialAPI } from '../../services/api';
+import { courseAPI, materialAPI, authAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import { FaSpinner, FaPlus, FaUpload, FaTrash, FaEdit, FaTimes, FaFileAlt, FaVideo, FaImage, FaMusic, FaQuestionCircle, FaArrowLeft } from 'react-icons/fa';
 
@@ -16,6 +17,7 @@ const MaterialType = {
 const CourseMaterials = () => {
   const { courseId } = useParams();
   const navigate = useNavigate();
+  const { user, updateUser } = useAuth();
   const [course, setCourse] = useState(null);
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -246,6 +248,14 @@ const CourseMaterials = () => {
       } else {
         await materialAPI.uploadMaterial(submitData);
         toast.success('Material uploaded successfully!');
+      }
+      
+      // Fetch updated user profile to reflect balance changes
+      try {
+        const userResponse = await authAPI.getUserProfile(user._id);
+        updateUser(userResponse.data.data);
+      } catch (error) {
+        console.error('Failed to update user profile:', error);
       }
       
       resetForm();

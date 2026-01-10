@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
-import { adminAPI } from '../../services/api';
+import { adminAPI, authAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import { FaCheckCircle, FaMoneyBillWave, FaSpinner, FaUser, FaBook } from 'react-icons/fa';
 
 const ApproveEnrollments = () => {
+  const { user, updateUser } = useAuth();
   const [enrollments, setEnrollments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
@@ -39,6 +41,15 @@ const ApproveEnrollments = () => {
         transactionID: enrollment.transactionID,
       });
       toast.success('Enrollment approved successfully!');
+      
+      // Fetch updated user profile to reflect balance changes
+      try {
+        const userResponse = await authAPI.getUserProfile(user._id);
+        updateUser(userResponse.data.data);
+      } catch (error) {
+        console.error('Failed to update user profile:', error);
+      }
+      
       // Refresh the list
       fetchPendingEnrollments();
     } catch (error) {

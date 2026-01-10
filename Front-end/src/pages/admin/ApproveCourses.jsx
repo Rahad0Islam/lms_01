@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
-import { adminAPI, courseAPI } from '../../services/api';
+import { adminAPI, courseAPI, authAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import { FaCheckCircle, FaMoneyBillWave, FaSpinner } from 'react-icons/fa';
 
 const ApproveCourses = () => {
+  const { user, updateUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [courses, setCourses] = useState([]);
   const [fetchLoading, setFetchLoading] = useState(true);
@@ -39,6 +41,15 @@ const ApproveCourses = () => {
         courseLanchPayment: parseFloat(payment),
       });
       toast.success('Course approved successfully!');
+      
+      // Fetch updated user profile to reflect balance changes
+      try {
+        const userResponse = await authAPI.getUserProfile(user._id);
+        updateUser(userResponse.data.data);
+      } catch (error) {
+        console.error('Failed to update user profile:', error);
+      }
+      
       // Refresh the list
       fetchPendingCourses();
     } catch (error) {

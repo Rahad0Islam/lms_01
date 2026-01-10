@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
-import { courseAPI, certificateAPI } from '../services/api';
+import { courseAPI, certificateAPI, authAPI } from '../services/api';
 import toast from 'react-hot-toast';
 import {
   FaBook,
@@ -17,7 +17,7 @@ import {
 
 const CourseDetail = () => {
   const { id } = useParams();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const navigate = useNavigate();
   const [course, setCourse] = useState(null);
   const [enrollmentStatus, setEnrollmentStatus] = useState(null);
@@ -106,6 +106,14 @@ const CourseDetail = () => {
       toast.success('Enrollment request submitted! Waiting for admin approval.');
       setShowEnrollModal(false);
       setSecretKey('');
+      
+      // Fetch updated user profile to reflect the new balance
+      try {
+        const userResponse = await authAPI.getUserProfile(user._id);
+        updateUser(userResponse.data.data);
+      } catch (error) {
+        console.error('Failed to update user profile:', error);
+      }
       
       // Navigate to my courses after a delay
       setTimeout(() => {
