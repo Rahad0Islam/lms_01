@@ -28,8 +28,10 @@ app.use(cookieParser())
 //importing Routers
 import UserRoutes from './Routes/User.Route.js'
 import courseRoutes from './Routes/course.Route.js'
+import classRoutes from './Routes/class.Route.js'
 app.use("/api/v1/users",UserRoutes)
 app.use("/api/v1/course",courseRoutes)
+app.use("/api/v1/class",classRoutes)
 
 
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { courseAPI, materialAPI, progressAPI } from '../services/api';
+import { progressAPI } from '../services/api';
 import toast from 'react-hot-toast';
 import { 
   FaSpinner, 
@@ -14,8 +14,12 @@ import {
   FaQuestionCircle,
   FaCheckCircle,
   FaChevronRight,
+  FaChevronDown,
   FaTimes,
-  FaClock
+  FaClock,
+  FaLock,
+  FaUnlock,
+  FaTrophy
 } from 'react-icons/fa';
 
 const MaterialType = {
@@ -29,64 +33,205 @@ const MaterialType = {
 const CourseLearning = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [course, setCourse] = useState(null);
-  const [materials, setMaterials] = useState([]);
-  const [currentMaterialIndex, setCurrentMaterialIndex] = useState(0);
+  
+  const [courseStructure, setCourseStructure] = useState([]);
+  const [overallProgress, setOverallProgress] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [selectedClass, setSelectedClass] = useState(null);
+  const [selectedMaterial, setSelectedMaterial] = useState(null);
+  const [expandedClasses, setExpandedClasses] = useState({});
+  
+  // MCQ state
   const [mcqAnswers, setMcqAnswers] = useState({});
-  const [showResults, setShowResults] = useState({});
-  const [examStarted, setExamStarted] = useState({});
-  const [timeRemaining, setTimeRemaining] = useState({});
-  const [timerIntervals, setTimerIntervals] = useState({});
-  const [examResults, setExamResults] = useState({}); // Store previously taken exam results
+  const [examStarted, setExamStarted] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [timerInterval, setTimerInterval] = useState(null);
   const [submittingExam, setSubmittingExam] = useState(false);
+  
+  // Video state
+  const [currentVideoUrl, setCurrentVideoUrl] = useState(null);
+  const [videoProgress, setVideoProgress] = useState({});
 
   useEffect(() => {
-    fetchCourseAndMaterials();
+    fetchCourseStructure();
     
-    // Cleanup timers on unmount
     return () => {
-      Object.values(timerIntervals).forEach(interval => {
-        if (interval) clearInterval(interval);
-      });
+      if (timerInterval) {
+        clearInterval(timerInterval);
+      }
     };
   }, [id]);
 
-  const startExam = (materialId, duration) => {
-    setExamStarted({
-      ...examStarted,
-      [materialId]: true
-    });
+  const fetchCourseStructure = async () => {
+    try {
+      const response = await progressAPI.getCourseStructure(id);
+      const data = response.data.data;
+      
+      setCourseStructure(data.structure);
+      setOverallProgress(data.overallProgress);
+      
+      // Auto-expand first unlocked class
+      if (data.structure.length > 0) {
+        const firstUnlocked = data.structure.find(c => c.isUnlocked);
+        if (firstUnlocked) {
+          setExpandedClasses({ [firstUnlocked._id]: true });
+          setSelectedClass(firstUnlocked);
+          
+          // Auto-select first unlocked material
+          const firstUnlockedMaterial = firstUnlocked.materials.find(m => m.isUnlocked);
+          if (firstUnlockedMaterial) {
+            setSelectedMaterial(firstUnlockedMaterial);
+          }
+        }
+      }
+      
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching course structure:', error);
+      toast.error(error.response?.data?.message || 'Failed to load course');
+      navigate(`/course/${id}`);
+    }
+  };
+
+  const toggleClassExpansion = (classId) => {
+    setExpandedClasses(prev => ({
+      ...prev,
+      [classId]: !prev[classId]
+    }));
+  };
+
+  const selectMaterial = (classDoc, material) => {
+    if (!material.isUnlocked) {
+      toast.error('This material is locked. Complete previous materials first.');
+      return;
+    }
     
-    const durationInSeconds = duration * 60;
-    setTimeRemaining({
-      ...timeRemaining,
-      [materialId]: durationInSeconds
-    });
+    setSelectedClass(classDoc);
+    setSelectedMaterial(material);
+    setMcqAnswers({});
+    setExamStarted(false);
+    
+    if (material.materialType === MaterialType.VIDEO && material.video?.length > 0) {
+      setCurrentVideoUrl(material.video[0].url);
+    }
+  };
+
+  const startExam = () => {
+    if (!selectedMaterial || selectedMaterial.materialType !== MaterialType.MCQ) return;
+    
+    setExamStarted(true);
+    const durationInSeconds = (selectedMaterial.mcqDuration || 5) * 60;
+    setTimeRemaining(durationInSeconds);
     
     const interval = setInterval(() => {
       setTimeRemaining(prev => {
-        const newTime = (prev[materialId] || 0) - 1;
-        
-        if (newTime <= 0) {
+        if (prev <= 1) {
           clearInterval(interval);
-          // Auto-submit when time runs out
-          const material = materials.find(m => m._id === materialId);
-          if (material) {
-            checkMcqAnswers(materialId, material);
-          }
+          handleSubmitExam();
           toast.error('Time is up! Exam submitted automatically.');
-          return { ...prev, [materialId]: 0 };
+          return 0;
         }
-        
-        return { ...prev, [materialId]: newTime };
+        return prev - 1;
       });
     }, 1000);
     
-    setTimerIntervals({
-      ...timerIntervals,
-      [materialId]: interval
-    });
+    setTimerInterval(interval);
+  };
+
+  const handleMcqAnswer = (questionIndex, answerIndex) => {
+    setMcqAnswers(prev => ({
+      ...prev,
+      [questionIndex]: answerIndex
+    }));
+  };
+
+  const handleSubmitExam = async () => {
+    if (!selectedMaterial || submittingExam) return;
+    
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      setTimerInterval(null);
+    }
+    
+    setSubmittingExam(true);
+    
+    try {
+      const answers = selectedMaterial.questions.map((question, qIndex) => ({
+        questionIndex: qIndex,
+        selectedAnswer: mcqAnswers[qIndex] !== undefined 
+          ? selectedMaterial.questions[qIndex].options[mcqAnswers[qIndex]]
+          : ''
+      }));
+
+      const duration = selectedMaterial.mcqDuration || 5;
+      const totalSeconds = duration * 60;
+      const timeTaken = totalSeconds - timeRemaining;
+
+      await progressAPI.submitExam({
+        courseID: id,
+        materialID: selectedMaterial._id,
+        answers,
+        timeTaken
+      });
+
+      toast.success('Exam submitted successfully!');
+      
+      // Refresh course structure to update unlock status
+      await fetchCourseStructure();
+      
+      setExamStarted(false);
+      setMcqAnswers({});
+    } catch (error) {
+      console.error('Error submitting exam:', error);
+      toast.error(error.response?.data?.message || 'Failed to submit exam');
+    } finally {
+      setSubmittingExam(false);
+    }
+  };
+
+  const handleVideoProgress = async (videoElement) => {
+    if (!selectedMaterial || !currentVideoUrl) return;
+    
+    const watchedSeconds = Math.floor(videoElement.currentTime);
+    
+    // Update every 5 seconds
+    if (watchedSeconds % 5 === 0 && watchedSeconds > 0) {
+      try {
+        await progressAPI.updateProgress({
+          courseID: id,
+          classID: selectedClass._id,
+          materialID: selectedMaterial._id,
+          watchedSeconds,
+          videoUrl: currentVideoUrl
+        });
+        
+        // Refresh structure if video is completed (80%)
+        const duration = videoElement.duration;
+        if (duration && (watchedSeconds / duration) >= 0.8) {
+          await fetchCourseStructure();
+        }
+      } catch (error) {
+        console.error('Error updating video progress:', error);
+      }
+    }
+  };
+
+  const markAsCompleted = async (materialType) => {
+    if (!selectedMaterial) return;
+    
+    try {
+      await progressAPI.updateProgress({
+        courseID: id,
+        classID: selectedClass._id,
+        materialID: selectedMaterial._id
+      });
+      
+      toast.success('Material marked as completed!');
+      await fetchCourseStructure();
+    } catch (error) {
+      console.error('Error marking as completed:', error);
+      toast.error(error.response?.data?.message || 'Failed to update progress');
+    }
   };
 
   const formatTime = (seconds) => {
@@ -95,570 +240,436 @@ const CourseLearning = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const fetchCourseAndMaterials = async () => {
-    try {
-      const [courseRes, materialsRes] = await Promise.all([
-        courseAPI.getCourseById(id),
-        materialAPI.getMaterialsByCourse(id)
-      ]);
-      
-      const courseData = courseRes.data.data.course;
-      const enrollmentStatus = courseRes.data.data.enrollmentStatus;
-      
-      // Check if user has access
-      if (!enrollmentStatus?.isEnrolled || enrollmentStatus?.paymentStatus !== 'paid') {
-        toast.error('You do not have access to this course');
-        navigate(`/course/${id}`);
-        return;
-      }
-      
-      setCourse(courseData);
-      const materialsData = materialsRes.data.data || [];
-      setMaterials(materialsData);
-      
-      // Fetch exam results for MCQ materials
-      const mcqMaterials = materialsData.filter(m => m.materialType === 'mcq');
-      const resultPromises = mcqMaterials.map(material => 
-        progressAPI.getExamResult(material._id).catch(() => ({ data: { data: null } }))
-      );
-      
-      const results = await Promise.all(resultPromises);
-      const examResultsMap = {};
-      
-      results.forEach((res, index) => {
-        if (res.data.data) {
-          examResultsMap[mcqMaterials[index]._id] = res.data.data;
-        }
-      });
-      
-      setExamResults(examResultsMap);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching course:', error);
-      toast.error(error.response?.data?.message || 'Failed to load course materials');
-      navigate(`/course/${id}`);
-    }
-  };
-
-  const handleMcqAnswer = (materialId, questionIndex, answerIndex) => {
-    setMcqAnswers({
-      ...mcqAnswers,
-      [`${materialId}-${questionIndex}`]: answerIndex
-    });
-  };
-
-  const checkMcqAnswers = async (materialId, material) => {
-    // Prevent submission if already taken
-    if (examResults[materialId]) {
-      toast.error('You have already taken this exam!');
-      return;
-    }
-
-    if (submittingExam) {
-      return; // Prevent double submission
-    }
-
-    // Stop the timer
-    if (timerIntervals[materialId]) {
-      clearInterval(timerIntervals[materialId]);
-    }
-    
-    setSubmittingExam(true);
-    
-    try {
-      // Prepare answers array
-      const answers = material.questions.map((question, qIndex) => ({
-        questionIndex: qIndex,
-        selectedAnswer: mcqAnswers[`${materialId}-${qIndex}`] !== undefined 
-          ? material.questions[qIndex].options[mcqAnswers[`${materialId}-${qIndex}`]]
-          : ''
-      }));
-
-      // Calculate time taken
-      const duration = material.mcqDuration || 5;
-      const totalSeconds = duration * 60;
-      const timeTaken = totalSeconds - (timeRemaining[materialId] || 0);
-
-      // Submit exam to backend
-      const response = await progressAPI.submitExam({
-        courseID: id,
-        materialID: materialId,
-        answers,
-        timeTaken
-      });
-
-      const examResult = response.data.data;
-      
-      // Update local exam results
-      setExamResults({
-        ...examResults,
-        [materialId]: examResult
-      });
-
-      // Show success message
-      toast.success(`Exam submitted! Score: ${examResult.correctAnswers}/${examResult.totalQuestions} (${examResult.score.toFixed(1)}%)`);
-      
-      // Refresh course materials to update progress
-      fetchCourseAndMaterials();
-      
-    } catch (error) {
-      console.error('Error submitting exam:', error);
-      const errorMessage = error.response?.data?.message || 'Failed to submit exam';
-      toast.error(errorMessage);
-      
-      // If already taken, fetch the result
-      if (error.response?.status === 400 && errorMessage.includes('already taken')) {
-        try {
-          const resultRes = await progressAPI.getExamResult(materialId);
-          if (resultRes.data.data) {
-            setExamResults({
-              ...examResults,
-              [materialId]: resultRes.data.data
-            });
-          }
-        } catch (fetchError) {
-          console.error('Error fetching exam result:', fetchError);
-        }
-      }
-    } finally {
-      setSubmittingExam(false);
-    }
-  };
-
-  const handleNextMaterial = () => {
-    if (currentMaterialIndex < materials.length - 1) {
-      setCurrentMaterialIndex(currentMaterialIndex + 1);
-    }
-  };
-
-  const handlePreviousMaterial = () => {
-    if (currentMaterialIndex > 0) {
-      setCurrentMaterialIndex(currentMaterialIndex - 1);
-    }
-  };
-
   const getMaterialIcon = (type) => {
     switch (type) {
-      case MaterialType.TEXT:
-        return <FaFileAlt className="text-blue-500" />;
-      case MaterialType.VIDEO:
-        return <FaVideo className="text-red-500" />;
-      case MaterialType.IMAGE:
-        return <FaImage className="text-green-500" />;
-      case MaterialType.AUDIO:
-        return <FaMusic className="text-purple-500" />;
-      case MaterialType.MCQ:
-        return <FaQuestionCircle className="text-orange-500" />;
-      default:
-        return <FaFileAlt />;
+      case MaterialType.TEXT: return <FaFileAlt />;
+      case MaterialType.VIDEO: return <FaVideo />;
+      case MaterialType.IMAGE: return <FaImage />;
+      case MaterialType.AUDIO: return <FaMusic />;
+      case MaterialType.MCQ: return <FaQuestionCircle />;
+      default: return <FaBook />;
     }
   };
 
-  const renderMaterialContent = (material) => {
-    const materialType = material.materialType;
+  const renderMaterialContent = () => {
+    if (!selectedMaterial) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-gray-400">
+          <FaBook className="text-6xl mb-4" />
+          <p className="text-xl">Select a material to start learning</p>
+        </div>
+      );
+    }
+
+    if (!selectedMaterial.isUnlocked) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-gray-400">
+          <FaLock className="text-6xl mb-4" />
+          <p className="text-xl">This material is locked</p>
+          <p className="text-sm mt-2">Complete previous materials to unlock</p>
+        </div>
+      );
+    }
+
+    const { materialType, text, video, audio, picture, questions, examResult } = selectedMaterial;
 
     switch (materialType) {
       case MaterialType.TEXT:
         return (
           <div className="prose max-w-none">
-            <div className="bg-white p-6 rounded-lg whitespace-pre-wrap">
-              {material.text}
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+              {selectedMaterial.isFinalExam && (
+                <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                  🏆 FINAL EXAM
+                </span>
+              )}
             </div>
+            {selectedMaterial.description && (
+              <p className="text-gray-600 mb-4">{selectedMaterial.description}</p>
+            )}
+            <div className="whitespace-pre-wrap">{text}</div>
+            {!selectedMaterial.isCompleted && (
+              <button
+                onClick={() => markAsCompleted(MaterialType.TEXT)}
+                className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Mark as Completed
+              </button>
+            )}
           </div>
         );
 
       case MaterialType.VIDEO:
         return (
-          <div className="space-y-4">
-            {material.video?.map((vid, index) => (
-              <div key={index} className="bg-black rounded-lg overflow-hidden">
-                <video 
-                  controls 
-                  className="w-full"
-                  src={vid.url}
-                >
-                  Your browser does not support the video tag.
-                </video>
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+              {selectedMaterial.isFinalExam && (
+                <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                  🏆 FINAL EXAM
+                </span>
+              )}
+            </div>
+            {selectedMaterial.description && (
+              <p className="text-gray-600 mb-4">{selectedMaterial.description}</p>
+            )}
+            {video && video.length > 0 && (
+              <div className="space-y-4">
+                {video.map((vid, index) => (
+                  <div key={index} className="bg-black rounded-lg overflow-hidden">
+                    <video
+                      controls
+                      className="w-full"
+                      src={vid.url}
+                      onTimeUpdate={(e) => handleVideoProgress(e.target)}
+                      onEnded={() => handleVideoProgress({ currentTime: vid.duration, duration: vid.duration })}
+                    >
+                      Your browser does not support the video tag.
+                    </video>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        );
-
-      case MaterialType.IMAGE:
-        return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {material.picture?.map((img, index) => (
-              <div key={index} className="rounded-lg overflow-hidden">
-                <img 
-                  src={img.url} 
-                  alt={`${material.title} - ${index + 1}`}
-                  className="w-full h-auto"
-                />
-              </div>
-            ))}
+            )}
           </div>
         );
 
       case MaterialType.AUDIO:
         return (
-          <div className="space-y-4">
-            {material.audio?.map((aud, index) => (
-              <div key={index} className="bg-gray-100 p-4 rounded-lg">
-                <audio 
-                  controls 
-                  className="w-full"
-                  src={aud.url}
-                >
-                  Your browser does not support the audio tag.
-                </audio>
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+              {selectedMaterial.isFinalExam && (
+                <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                  🏆 FINAL EXAM
+                </span>
+              )}
+            </div>
+            {selectedMaterial.description && (
+              <p className="text-gray-600 mb-4">{selectedMaterial.description}</p>
+            )}
+            {audio && audio.length > 0 && (
+              <div className="space-y-4">
+                {audio.map((aud, index) => (
+                  <audio key={index} controls className="w-full" src={aud.url}>
+                    Your browser does not support the audio tag.
+                  </audio>
+                ))}
               </div>
-            ))}
+            )}
+            {!selectedMaterial.isCompleted && (
+              <button
+                onClick={() => markAsCompleted(MaterialType.AUDIO)}
+                className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Mark as Completed
+              </button>
+            )}
+          </div>
+        );
+
+      case MaterialType.IMAGE:
+        return (
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+              {selectedMaterial.isFinalExam && (
+                <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                  🏆 FINAL EXAM
+                </span>
+              )}
+            </div>
+            {selectedMaterial.description && (
+              <p className="text-gray-600 mb-4">{selectedMaterial.description}</p>
+            )}
+            {picture && picture.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {picture.map((pic, index) => (
+                  <img 
+                    key={index} 
+                    src={pic.url} 
+                    alt={`Content ${index + 1}`}
+                    className="w-full rounded-lg shadow-lg"
+                  />
+                ))}
+              </div>
+            )}
+            {!selectedMaterial.isCompleted && (
+              <button
+                onClick={() => markAsCompleted(MaterialType.IMAGE)}
+                className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Mark as Completed
+              </button>
+            )}
           </div>
         );
 
       case MaterialType.MCQ:
-        if (!material.questions || material.questions.length === 0) {
-          return <p className="text-gray-500">No questions available</p>;
-        }
-        
-        const existingResult = examResults[material._id];
-        const isExamStarted = examStarted[material._id];
-        const timeLeft = timeRemaining[material._id];
-        const duration = material.mcqDuration || material.questions.length;
-        
-        // Show exam result if already taken
-        if (existingResult) {
+        if (examResult) {
           return (
-            <div className="space-y-6">
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-8 rounded-lg border-2 border-green-300">
-                <div className="flex items-center justify-center mb-4">
-                  <FaCheckCircle className="text-6xl text-green-600" />
-                </div>
-                <h3 className="text-2xl font-bold text-center text-gray-900 mb-4">
-                  Exam Completed
-                </h3>
-                <div className="grid grid-cols-2 gap-4 max-w-md mx-auto">
-                  <div className="bg-white p-4 rounded-lg text-center">
-                    <p className="text-gray-600 text-sm mb-1">Score</p>
-                    <p className="text-3xl font-bold text-green-600">
-                      {existingResult.score.toFixed(1)}%
-                    </p>
-                  </div>
-                  <div className="bg-white p-4 rounded-lg text-center">
-                    <p className="text-gray-600 text-sm mb-1">Correct Answers</p>
-                    <p className="text-3xl font-bold text-blue-600">
-                      {existingResult.correctAnswers}/{existingResult.totalQuestions}
-                    </p>
-                  </div>
-                </div>
-                <p className="text-center text-gray-600 mt-4">
-                  Completed on: {new Date(existingResult.completedAt).toLocaleString()}
-                </p>
-                <div className="bg-yellow-50 border border-yellow-300 p-4 rounded-lg mt-6">
-                  <p className="text-yellow-800 text-center font-semibold">
-                    ℹ️ You can only take this exam once. Your result has been saved.
-                  </p>
-                </div>
+            <div>
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+                {selectedMaterial.isFinalExam && (
+                  <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                    🏆 FINAL EXAM
+                  </span>
+                )}
               </div>
-              
-              {/* Show questions with answers for review */}
-              <div className="bg-white p-6 rounded-lg border border-gray-200">
-                <h4 className="text-xl font-bold text-gray-900 mb-4">Review Your Answers</h4>
-                <div className="space-y-6">
-                  {material.questions.map((question, qIndex) => {
-                    const userAnswerObj = existingResult.answers.find(a => a.questionIndex === qIndex);
-                    const correctAnswer = question.answer;
-                    
-                    return (
-                      <div key={qIndex} className="border-b border-gray-200 pb-4 last:border-b-0">
-                        <div className="flex items-start gap-3 mb-3">
-                          <span className="flex-shrink-0 w-8 h-8 bg-primary-100 text-primary-700 rounded-full flex items-center justify-center font-bold">
-                            {qIndex + 1}
-                          </span>
-                          <h5 className="text-lg font-semibold text-gray-900 flex-1">
-                            {question.question}
-                          </h5>
-                          {userAnswerObj?.isCorrect ? (
-                            <FaCheckCircle className="text-green-600 text-2xl" />
-                          ) : (
-                            <FaTimes className="text-red-600 text-2xl" />
-                          )}
-                        </div>
-                        
-                        <div className="ml-11 space-y-2">
-                          {question.options?.map((option, optIndex) => {
-                            const isCorrect = option === correctAnswer;
-                            const isUserAnswer = option === userAnswerObj?.selectedAnswer;
-                            
-                            let optionClass = 'bg-gray-50 border-gray-300';
-                            if (isCorrect) {
-                              optionClass = 'bg-green-100 border-green-500 font-semibold';
-                            } else if (isUserAnswer && !isCorrect) {
-                              optionClass = 'bg-red-100 border-red-500';
-                            }
-                            
-                            return (
-                              <div
-                                key={optIndex}
-                                className={`flex items-center p-3 border rounded-lg ${optionClass}`}
-                              >
-                                <span className="flex-1">{option}</span>
-                                {isCorrect && (
-                                  <span className="text-green-600 text-sm ml-2">✓ Correct Answer</span>
-                                )}
-                                {isUserAnswer && !isCorrect && (
-                                  <span className="text-red-600 text-sm ml-2">✗ Your Answer</span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <FaCheckCircle className="text-green-600 text-3xl" />
+                  <div>
+                    <h3 className="text-xl font-bold text-green-800">Exam Completed</h3>
+                    <p className="text-green-600">You have already taken this exam</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div className="bg-white rounded-lg p-4">
+                    <p className="text-sm text-gray-600">Score</p>
+                    <p className="text-2xl font-bold text-green-600">{examResult.score.toFixed(1)}%</p>
+                  </div>
+                  <div className="bg-white rounded-lg p-4">
+                    <p className="text-sm text-gray-600">Correct Answers</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {examResult.correctAnswers}/{examResult.totalQuestions}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
           );
         }
-        
-        // Show Start Exam button if exam hasn't started
-        if (!isExamStarted) {
+
+        if (!examStarted) {
           return (
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-lg text-center">
-              <FaQuestionCircle className="text-6xl text-blue-500 mx-auto mb-4" />
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">MCQ Exam</h3>
-              <p className="text-gray-600 mb-2">
-                Questions: {material.questions.length}
-              </p>
-              <p className="text-gray-600 mb-6">
-                Duration: {duration} minutes
-              </p>
-              <div className="bg-yellow-50 border border-yellow-300 p-4 rounded-lg mb-6">
-                <p className="text-yellow-800 font-semibold">⚠️ Important Instructions:</p>
-                <ul className="text-left text-yellow-700 mt-2 space-y-1">
-                  <li>• Once started, the timer will begin automatically</li>
-                  <li>• You can only take this exam ONCE</li>
-                  <li>• The exam will auto-submit when time expires</li>
-                  <li>• Your answers will be saved permanently</li>
-                  <li>• Make sure you have a stable internet connection</li>
+            <div>
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+                {selectedMaterial.isFinalExam && (
+                  <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                    🏆 FINAL EXAM
+                  </span>
+                )}
+              </div>
+              {selectedMaterial.description && (
+                <p className="text-gray-600 mb-4">{selectedMaterial.description}</p>
+              )}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                <h3 className="text-xl font-bold mb-4">Exam Instructions</h3>
+                <ul className="list-disc list-inside space-y-2 mb-6">
+                  <li>Total Questions: {questions?.length || 0}</li>
+                  <li>Duration: {selectedMaterial.mcqDuration || 5} minutes</li>
+                  <li>You can only attempt this exam once</li>
+                  <li>Make sure you have a stable internet connection</li>
                 </ul>
+                <button
+                  onClick={startExam}
+                  className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
+                >
+                  Start Exam
+                </button>
               </div>
-              <button
-                onClick={() => startExam(material._id, duration)}
-                className="btn-primary text-lg px-8 py-3"
-              >
-                Start Exam
-              </button>
             </div>
           );
         }
-        
+
         return (
-          <div className="space-y-6">
-            {/* Timer Display - Sticky on right */}
-            {isExamStarted && (
-              <div className="fixed top-24 right-8 z-50">
-                <div className={`p-4 rounded-lg shadow-lg ${
-                  timeLeft <= 60 ? 'bg-red-100 border-2 border-red-500 animate-pulse' : 'bg-white border-2 border-blue-500'
-                }`}>
-                  <p className="text-sm text-gray-600 mb-1">Time Remaining</p>
-                  <p className={`text-3xl font-bold ${
-                    timeLeft <= 60 ? 'text-red-600' : 'text-blue-600'
-                  }`}>
-                    {formatTime(timeLeft)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {timeLeft <= 60 ? 'Hurry up!' : 'Keep going!'}
-                  </p>
-                </div>
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center gap-3">
+                <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+                {selectedMaterial.isFinalExam && (
+                  <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                    🏆 FINAL EXAM
+                  </span>
+                )}
               </div>
-            )}
+              <div className="flex items-center gap-2 bg-red-100 text-red-700 px-4 py-2 rounded-lg">
+                <FaClock />
+                <span className="font-mono font-bold">{formatTime(timeRemaining)}</span>
+              </div>
+            </div>
             
-            {material.questions.map((question, qIndex) => {
-              const userAnswer = mcqAnswers[`${material._id}-${qIndex}`];
-              
-              return (
-                <div key={qIndex} className="bg-white p-6 rounded-lg border border-gray-200">
-                  <div className="flex items-start gap-3 mb-4">
-                    <span className="flex-shrink-0 w-8 h-8 bg-primary-100 text-primary-700 rounded-full flex items-center justify-center font-bold">
-                      {qIndex + 1}
-                    </span>
-                    <h3 className="text-lg font-bold text-gray-900 flex-1">
-                      {question.question}
-                    </h3>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    {question.options?.map((option, optIndex) => {
-                      const isSelected = userAnswer === optIndex;
-                      const optionClass = isSelected 
-                        ? 'bg-blue-100 border-blue-500' 
-                        : 'bg-gray-50 border-gray-300 hover:bg-gray-100';
-                      
-                      return (
-                        <label
-                          key={optIndex}
-                          className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${optionClass}`}
-                        >
-                          <input
-                            type="radio"
-                            name={`mcq-${material._id}-${qIndex}`}
-                            value={optIndex}
-                            checked={isSelected}
-                            onChange={() => handleMcqAnswer(material._id, qIndex, optIndex)}
-                            className="mr-3"
-                          />
-                          <span className="flex-1">{option}</span>
-                        </label>
-                      );
-                    })}
+            <div className="space-y-6">
+              {questions?.map((question, qIndex) => (
+                <div key={qIndex} className="bg-white border border-gray-200 rounded-lg p-6">
+                  <h3 className="font-semibold mb-4">
+                    {qIndex + 1}. {question.question}
+                  </h3>
+                  <div className="space-y-2">
+                    {question.options.map((option, oIndex) => (
+                      <label
+                        key={oIndex}
+                        className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
+                          mcqAnswers[qIndex] === oIndex
+                            ? 'bg-blue-50 border-blue-500'
+                            : 'hover:bg-gray-50 border-gray-200'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name={`question-${qIndex}`}
+                          checked={mcqAnswers[qIndex] === oIndex}
+                          onChange={() => handleMcqAnswer(qIndex, oIndex)}
+                          className="mr-3"
+                        />
+                        <span>{option}</span>
+                      </label>
+                    ))}
                   </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
             
             <button
-              onClick={() => checkMcqAnswers(material._id, material)}
+              onClick={handleSubmitExam}
               disabled={submittingExam}
-              className="btn-primary w-full disabled:opacity-50"
+              className="mt-6 w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold disabled:opacity-50"
             >
-              {submittingExam ? 'Submitting...' : 'Submit Answers'}
+              {submittingExam ? 'Submitting...' : 'Submit Exam'}
             </button>
           </div>
         );
 
       default:
-        return <p className="text-gray-500">Unsupported material type</p>;
+        return <p>Unsupported material type</p>;
     }
   };
 
   if (loading) {
     return (
       <Layout>
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <FaSpinner className="animate-spin text-5xl text-primary-500" />
+        <div className="flex items-center justify-center h-screen">
+          <FaSpinner className="animate-spin text-4xl text-blue-600" />
         </div>
       </Layout>
     );
   }
-
-  if (materials.length === 0) {
-    return (
-      <Layout>
-        <div className="max-w-7xl mx-auto">
-          <button
-            onClick={() => navigate(`/course/${id}`)}
-            className="text-primary-600 hover:text-primary-700 mb-4 flex items-center"
-          >
-            <FaArrowLeft className="mr-2" />
-            Back to Course
-          </button>
-          <div className="card text-center py-12">
-            <FaBook className="text-6xl text-gray-300 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">No Materials Yet</h2>
-            <p className="text-gray-500">The instructor hasn't added any materials to this course yet.</p>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  const currentMaterial = materials[currentMaterialIndex];
 
   return (
     <Layout>
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <button
-          onClick={() => navigate(`/course/${id}`)}
-          className="text-primary-600 hover:text-primary-700 mb-4 flex items-center"
-        >
-          <FaArrowLeft className="mr-2" />
-          Back to Course
-        </button>
-
-        <div className="mb-6">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            {course?.title}
-          </h1>
-          <p className="text-gray-600">
-            Material {currentMaterialIndex + 1} of {materials.length}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Sidebar - Material List */}
-          <div className="lg:col-span-1">
-            <div className="card sticky top-4">
-              <h3 className="font-bold text-gray-900 mb-4">Course Content</h3>
-              <div className="space-y-2">
-                {materials.map((material, index) => (
-                  <button
-                    key={material._id}
-                    onClick={() => setCurrentMaterialIndex(index)}
-                    className={`w-full text-left p-3 rounded-lg transition-colors flex items-center ${
-                      index === currentMaterialIndex
-                        ? 'bg-primary-100 text-primary-700 font-semibold'
-                        : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
-                    }`}
-                  >
-                    <span className="text-xl mr-3">
-                      {getMaterialIcon(material.materialType)}
-                    </span>
-                    <span className="flex-1 text-sm">{material.title}</span>
-                    {index === currentMaterialIndex && (
-                      <FaChevronRight className="ml-2" />
-                    )}
-                  </button>
-                ))}
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-7xl mx-auto px-4">
+          {/* Header */}
+          <div className="mb-6">
+            <button
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-2 text-blue-600 hover:text-blue-700 mb-4"
+            >
+              <FaArrowLeft /> Back to Course
+            </button>
+            
+            {/* Progress Bar */}
+            <div className="bg-white rounded-lg shadow-sm p-4">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-semibold">Overall Progress</h3>
+                <span className="text-sm font-bold text-blue-600">{overallProgress.toFixed(1)}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-3">
+                <div
+                  className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                  style={{ width: `${overallProgress}%` }}
+                />
               </div>
             </div>
           </div>
 
-          {/* Main Content */}
-          <div className="lg:col-span-3">
-            <div className="card">
-              <div className="mb-6">
-                <div className="flex items-center mb-2">
-                  <span className="text-2xl mr-3">
-                    {getMaterialIcon(currentMaterial.materialType)}
-                  </span>
-                  <h2 className="text-2xl font-bold text-gray-900">
-                    {currentMaterial.title}
-                  </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Sidebar - Class and Material List */}
+            <div className="lg:col-span-1">
+              <div className="bg-white rounded-lg shadow-sm p-4 sticky top-4 max-h-[calc(100vh-8rem)] overflow-y-auto">
+                <h2 className="text-xl font-bold mb-4">Course Content</h2>
+                
+                <div className="space-y-2">
+                  {courseStructure.map((classDoc) => (
+                    <div key={classDoc._id} className="border border-gray-200 rounded-lg overflow-hidden">
+                      {/* Class Header */}
+                      <button
+                        onClick={() => toggleClassExpansion(classDoc._id)}
+                        className={`w-full flex items-center justify-between p-3 transition-colors ${
+                          !classDoc.isUnlocked 
+                            ? 'bg-gray-100 cursor-not-allowed'
+                            : 'bg-white hover:bg-gray-50'
+                        }`}
+                        disabled={!classDoc.isUnlocked}
+                      >
+                        <div className="flex items-center gap-3 flex-1">
+                          {classDoc.isUnlocked ? (
+                            classDoc.isCompleted ? (
+                              <FaCheckCircle className="text-green-600 flex-shrink-0" />
+                            ) : (
+                              <FaUnlock className="text-blue-600 flex-shrink-0" />
+                            )
+                          ) : (
+                            <FaLock className="text-gray-400 flex-shrink-0" />
+                          )}
+                          <div className="flex-1 text-left">
+                            <p className={`font-semibold text-sm ${!classDoc.isUnlocked ? 'text-gray-400' : ''}`}>
+                              {classDoc.title}
+                              {classDoc.isFinalExam && (
+                                <FaTrophy className="inline ml-2 text-yellow-500" />
+                              )}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {classDoc.materials.length} materials
+                            </p>
+                          </div>
+                        </div>
+                        {expandedClasses[classDoc._id] ? <FaChevronDown /> : <FaChevronRight />}
+                      </button>
+                      
+                      {/* Materials List */}
+                      {expandedClasses[classDoc._id] && (
+                        <div className="border-t border-gray-200 bg-gray-50">
+                          {classDoc.materials.map((material) => (
+                            <button
+                              key={material._id}
+                              onClick={() => selectMaterial(classDoc, material)}
+                              disabled={!material.isUnlocked}
+                              className={`w-full flex items-center gap-3 p-3 border-b border-gray-200 last:border-b-0 transition-colors ${
+                                !material.isUnlocked
+                                  ? 'cursor-not-allowed opacity-50'
+                                  : selectedMaterial?._id === material._id
+                                  ? 'bg-blue-50 border-l-4 border-l-blue-600'
+                                  : 'hover:bg-gray-100'
+                              }`}
+                            >
+                              <div className="flex-shrink-0">
+                                {material.isCompleted ? (
+                                  <FaCheckCircle className="text-green-600" />
+                                ) : material.isUnlocked ? (
+                                  getMaterialIcon(material.materialType)
+                                ) : (
+                                  <FaLock className="text-gray-400" />
+                                )}
+                              </div>
+                              <div className="flex-1 text-left">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium">{material.title}</p>
+                                  {material.isFinalExam && (
+                                    <span className="text-xs bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded font-semibold">
+                                      🏆 FINAL
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-gray-500 capitalize">{material.materialType}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                {currentMaterial.description && (
-                  <p className="text-gray-600">{currentMaterial.description}</p>
-                )}
               </div>
+            </div>
 
-              {/* Material Content */}
-              <div className="mb-6">
-                {renderMaterialContent(currentMaterial)}
-              </div>
-
-              {/* Navigation */}
-              <div className="flex justify-between items-center pt-6 border-t">
-                <button
-                  onClick={handlePreviousMaterial}
-                  disabled={currentMaterialIndex === 0}
-                  className="btn-outline disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <FaArrowLeft className="inline mr-2" />
-                  Previous
-                </button>
-                <span className="text-gray-600">
-                  {currentMaterialIndex + 1} / {materials.length}
-                </span>
-                <button
-                  onClick={handleNextMaterial}
-                  disabled={currentMaterialIndex === materials.length - 1}
-                  className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next
-                  <FaChevronRight className="inline ml-2" />
-                </button>
+            {/* Main Content Area */}
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-lg shadow-sm p-6 min-h-[600px]">
+                {renderMaterialContent()}
               </div>
             </div>
           </div>

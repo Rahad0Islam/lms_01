@@ -1,4 +1,5 @@
 import { Course } from "../Models/Course.model.js";
+import { Class } from "../Models/class.model.js";
 import { User } from "../Models/User.Model.js";
 import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
@@ -11,12 +12,16 @@ import { Enroll } from "../Models/enroll.model.js";
 import { adminID } from "../constant.js";
 
 const addMaterial=AsynHandler(async(req,res)=>{
-      const {title,description,courseID,materialType,text,mcq,mcqDuration} =req.body;
+      const {title,description,courseID,classID,materialType,text,mcq,mcqDuration,isFinalExam} =req.body;
       
       console.log(materialType);
       
       if( !courseID || !materialType){
-        throw new ApiError(401,"all Feilds are required! ");
+        throw new ApiError(401,"courseID and materialType are required!");
+      }
+      
+      if(!title || title.trim() === ''){
+        throw new ApiError(401,"title is required!");
       }
     
 
@@ -33,6 +38,61 @@ const addMaterial=AsynHandler(async(req,res)=>{
     if(!course){
         throw new ApiError(401,"Course ID is invalid ")
     }
+    
+    // Check if a final exam already exists for this course
+    if(isFinalExam === 'true' || isFinalExam === true){
+      const existingFinalExam = await Material.findOne({ courseID, isFinalExam: true });
+      if(existingFinalExam){
+        throw new ApiError(400,"A final exam already exists for this course. Only one final exam is allowed.");
+      }
+    }
+    
+    // Check if trying to add material after final exam
+    const finalExamExists = await Material.findOne({ courseID, isFinalExam: true });
+    if(finalExamExists && !(isFinalExam === 'true' || isFinalExam === true)){
+      throw new ApiError(400,"Cannot add more materials after final exam. The course has ended.");
+    }
+    
+    // Handle classID - create default class if not provided (backward compatibility)
+    let finalClassID = classID;
+    
+    if(!classID){
+        // Check if a default class exists
+        let defaultClass = await Class.findOne({ 
+            courseID, 
+            title: 'Course Materials' 
+        });
+        
+        if(!defaultClass){
+            // Create a default class
+            defaultClass = await Class.create({
+                courseID,
+                title: 'Course Materials',
+                description: 'All course materials',
+                order: 0,
+                isFinalExam: false,
+                isEnabled: true,
+                createdBy: user._id
+            });
+            console.log('Created default class for backward compatibility');
+        }
+        
+        finalClassID = defaultClass._id;
+    } else {
+        // Verify the provided classID exists and belongs to this course
+        const classDoc = await Class.findById(classID);
+        if(!classDoc){
+            throw new ApiError(401,"Class ID is invalid")
+        }
+        
+        if(classDoc.courseID.toString() !== courseID){
+            throw new ApiError(401,"Class does not belong to this course")
+        }
+    }
+    
+    // Get the next order number for this class
+    const lastMaterial = await Material.findOne({ classID: finalClassID }).sort({ order: -1 });
+    const order = lastMaterial ? lastMaterial.order + 1 : 0;
     const pictureLocalPath=[];
     const pictureFiles = Array.isArray(req.files?.picture) ? req.files.picture : [];
     for (const pic of pictureFiles) {
@@ -98,8 +158,10 @@ const addMaterial=AsynHandler(async(req,res)=>{
   }
    const material=await Material.create({
      courseID,
+     classID: finalClassID,
      title,
-     description,
+     description: description || "",
+     order,
      materialType,
      text:text||null,
      picture:pictureLocalPath,
@@ -107,6 +169,7 @@ const addMaterial=AsynHandler(async(req,res)=>{
      audio:audioLocalPath,
      questions,
      mcqDuration: mcqDuration || questions.length || 5,
+     isFinalExam: isFinalExam === 'true' || isFinalExam === true,
      uploadedBy:req.user?._id
      
    })
@@ -274,13 +337,42 @@ const getAllmaterialList=AsynHandler(async(req,res)=>{
      }
     }
 
-
-    const fetchAlldata=await Material.find({courseID}).sort({ createdAt: -1 });;
+    // Get all classes for this course
+    const classes = await Class.find({courseID}).sort({ order: 1 });
+    
+    // Get all materials and populate classID
+    const allMaterials = await Material.find({courseID})
+      .populate('classID', 'title order')
+      .sort({ order: 1 });
+    
+    // Group materials by class
+    const structuredData = classes.map(classDoc => {
+      const classMaterials = allMaterials.filter(
+        m => m.classID && m.classID._id.toString() === classDoc._id.toString()
+      );
+      
+      return {
+        _id: classDoc._id,
+        title: classDoc.title,
+        description: classDoc.description,
+        order: classDoc.order,
+        isFinalExam: classDoc.isFinalExam,
+        isEnabled: classDoc.isEnabled,
+        materials: classMaterials
+      };
+    });
+    
+    // For backward compatibility, also include flat list
+    const fetchAlldata = allMaterials;
+    
     console.log("fetched all material succesfully ");
     return res
     .status(201)
     .json(
-      new ApiResponse(201,fetchAlldata,"fetched all material succesfully ")
+      new ApiResponse(201, {
+        materials: fetchAlldata,
+        structured: structuredData
+      }, "fetched all material succesfully ")
     )
 
 })

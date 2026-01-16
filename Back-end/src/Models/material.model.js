@@ -6,13 +6,27 @@ const materialSchema=new mongoose.Schema({
     ref:"Course",
     required:true
   },
-   title:{
-    type:String,
-    
+  
+  classID:{
+    type:mongoose.Schema.Types.ObjectId,
+    ref:"Class",
+    required:true
   },
+  
+  title:{
+    type:String,
+    required:true
+  },
+  
   description:{
     type:String,
-   
+    default: ""
+  },
+  
+  order:{
+    type:Number,
+    required:true,
+    min:0
   },
   
   materialType:{
@@ -57,6 +71,11 @@ const materialSchema=new mongoose.Schema({
     type: Number,
     default: 5
   },
+  
+  isFinalExam: {
+    type: Boolean,
+    default: false
+  },
 
 uploadedBy:{
    type:mongoose.Schema.Types.ObjectId,
@@ -66,5 +85,7 @@ uploadedBy:{
 
 },{timestamps:true})
 
+// Ensure unique order within a class
+materialSchema.index({ classID: 1, order: 1 }, { unique: true });
 
 export const Material=mongoose.model("Material",materialSchema)

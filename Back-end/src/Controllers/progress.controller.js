@@ -1,5 +1,6 @@
 import { Progress } from "../Models/progress.model.js";
 import { Material } from "../Models/material.model.js";
+import { Class } from "../Models/class.model.js";
 import { Enroll } from "../Models/enroll.model.js";
 import { ExamResult } from "../Models/examResult.model.js";
 import { Certificate } from "../Models/certificate.model.js";
@@ -8,77 +9,239 @@ import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { AsynHandler } from "../Utils/AsyncHandler.js";
 
-const updateProgress = AsynHandler(async (req, res) => {
-  const { courseID, materialID, watchedSeconds, videoUrl } = req.body;
+// Get course structure with lock status for a learner
+const getCourseStructure = AsynHandler(async (req, res) => {
+  const { courseID } = req.params;
   const learnerID = req.user?._id;
 
-  if (!courseID || !materialID || !watchedSeconds || !videoUrl) {
-    throw new ApiError(400, "courseID, materialID, watchedSeconds, videoUrl are required");
+  // Verify enrollment
+  const enrollment = await Enroll.findOne({ courseID, learnerID });
+  if (!enrollment || enrollment.paymentStatus !== "paid") {
+    throw new ApiError(403, "You are not enrolled in this course");
   }
 
-  const material = await Material.findById(materialID);
-  if (!material) throw new ApiError(404, "Material not found");
+  // Get all classes sorted by order
+  const classes = await Class.find({ courseID }).sort({ order: 1 });
 
-  
-  const videoObj = material.video.find(v => v.url === videoUrl);
-  if (!videoObj) throw new ApiError(404, "Video not found in material");
+  // Get all materials sorted by class and order
+  const materials = await Material.find({ courseID }).sort({ order: 1 });
 
-  const duration = videoObj.duration;
-  if (!duration) throw new ApiError(400, "Video duration not available");
+  // Get all progress records for this learner
+  const progressRecords = await Progress.find({ courseID, learnerID });
+  const progressMap = {};
+  progressRecords.forEach(p => {
+    if (p.materialID) {
+      progressMap[p.materialID.toString()] = p;
+    }
+  });
 
+  // Get exam results
+  const examResults = await ExamResult.find({ courseID, learnerID });
+  const examResultsMap = {};
+  examResults.forEach(e => {
+    examResultsMap[e.materialID.toString()] = e;
+  });
 
-  let progress = await Progress.findOne({ courseID, learnerID, materialID, videoUrl });
+  // Build the structure with lock status
+  const structure = [];
+  let previousClassCompleted = true;
 
-  if (!progress) {
-    progress = new Progress({
-      courseID,
-      learnerID,
-      materialID,
-      videoUrl,
-      watchedSeconds: 0,
-      watchedPercent: 0,
-      completed: false
-    });
-  }
+  for (let i = 0; i < classes.length; i++) {
+    const classDoc = classes[i];
+    const classMaterials = materials.filter(m => 
+      m.classID && m.classID.toString() === classDoc._id.toString()
+    );
 
-  if (watchedSeconds > progress.watchedSeconds) {
-    progress.watchedSeconds = watchedSeconds;
-    progress.watchedPercent = (watchedSeconds / duration) * 100;
+    // Determine if this class is unlocked
+    const isClassUnlocked = i === 0 || previousClassCompleted;
 
-    if (progress.watchedPercent >= 80) {
-      progress.completed = true;
+    // Process materials in this class
+    const materialsWithStatus = [];
+    let previousMaterialCompleted = true;
+    let allMaterialsCompleted = true;
+
+    for (let j = 0; j < classMaterials.length; j++) {
+      const material = classMaterials[j];
+      const materialProgress = progressMap[material._id.toString()];
+      const examResult = examResultsMap[material._id.toString()];
+
+      // Determine if material is completed
+      let isCompleted = false;
+      if (material.materialType === 'mcq') {
+        isCompleted = !!examResult; // MCQ completed if exam result exists
+      } else {
+        isCompleted = materialProgress?.completed || false;
+      }
+
+      // Determine if this material is unlocked
+      const isUnlocked = isClassUnlocked && (j === 0 || previousMaterialCompleted);
+
+      materialsWithStatus.push({
+        _id: material._id,
+        title: material.title,
+        description: material.description,
+        materialType: material.materialType,
+        order: material.order,
+        isFinalExam: material.isFinalExam,
+        isUnlocked,
+        isCompleted,
+        progress: materialProgress || null,
+        examResult: examResult || null,
+        // Only include material content if unlocked
+        ...(isUnlocked && {
+          text: material.text,
+          picture: material.picture,
+          video: material.video,
+          audio: material.audio,
+          questions: material.materialType === 'mcq' ? material.questions : undefined,
+          mcqDuration: material.mcqDuration
+        })
+      });
+
+      if (!isCompleted) {
+        allMaterialsCompleted = false;
+      }
+      previousMaterialCompleted = isCompleted;
     }
 
-    await progress.save();
+    structure.push({
+      _id: classDoc._id,
+      title: classDoc.title,
+      description: classDoc.description,
+      order: classDoc.order,
+      isUnlocked: isClassUnlocked,
+      isCompleted: allMaterialsCompleted,
+      materials: materialsWithStatus
+    });
+
+    previousClassCompleted = allMaterialsCompleted;
   }
 
-
-  const totalMaterials = await Material.countDocuments({ courseID });
-  const completedMaterials = await Progress.countDocuments({ courseID, learnerID, completed: true });
-  const courseProgress = (completedMaterials / totalMaterials) * 100;
-
-  const enroll = await Enroll.findOneAndUpdate(
-    { courseID, learnerID },
-    { progress: courseProgress },
-    { new: true }
+  // Calculate overall course completion - only count regular materials (exclude final exam)
+  const enabledClassIDs = classes.map(c => c._id.toString());
+  const enabledMaterials = materials.filter(m => 
+    m.classID && enabledClassIDs.includes(m.classID.toString())
   );
-
-
-  if (courseProgress >= 100 && !enroll.certificateIssued) {
-    enroll.status = "completed";
-    // enroll.certificateIssued = true;
-    await enroll.save({validateBeforeSave:false});
+  
+  // Filter out final exam materials from progress calculation
+  const regularMaterials = enabledMaterials.filter(m => !m.isFinalExam);
+  const totalMaterials = regularMaterials.length;
+  
+  // Count unique completed regular materials (avoid double counting)
+  let completedMaterialsCount = 0;
+  for (const material of regularMaterials) {
+    const materialId = material._id.toString();
+    // Check if MCQ exam completed
+    if (material.materialType === 'mcq') {
+      if (examResultsMap[materialId]) {
+        completedMaterialsCount++;
+      }
+    } else {
+      // Check if other material completed
+      if (progressMap[materialId]?.completed) {
+        completedMaterialsCount++;
+      }
+    }
   }
   
- console.log("Progress updated successfully");
+  const overallProgress = totalMaterials > 0 ? (completedMaterialsCount / totalMaterials) * 100 : 0;
 
-  return res
-  .status(200)
-  .json(
-    new ApiResponse(200, { progress, enroll }, "Progress updated successfully")
+  return res.status(200).json(
+    new ApiResponse(200, {
+      structure,
+      overallProgress,
+      enrollment
+    }, "Course structure with lock status fetched successfully")
   );
 });
 
+// Update progress for video/audio/text materials
+const updateProgress = AsynHandler(async (req, res) => {
+  const { courseID, classID, materialID, watchedSeconds, videoUrl } = req.body;
+  const learnerID = req.user?._id;
+
+  if (!courseID || !materialID) {
+    throw new ApiError(400, "courseID and materialID are required");
+  }
+
+  // Verify enrollment
+  const enrollment = await Enroll.findOne({ courseID, learnerID });
+  if (!enrollment || enrollment.paymentStatus !== "paid") {
+    throw new ApiError(403, "You are not enrolled in this course");
+  }
+
+  // Get material
+  const material = await Material.findById(materialID);
+  if (!material) throw new ApiError(404, "Material not found");
+
+  // Verify material is unlocked for this learner
+  const isUnlocked = await checkMaterialUnlocked(courseID, materialID, learnerID);
+  if (!isUnlocked) {
+    throw new ApiError(403, "This material is locked. Complete previous materials first.");
+  }
+
+  let progress = await Progress.findOne({ courseID, learnerID, materialID, videoUrl });
+
+  // Handle different material types
+  if (material.materialType === 'video' && videoUrl) {
+    const videoObj = material.video.find(v => v.url === videoUrl);
+    if (!videoObj) throw new ApiError(404, "Video not found in material");
+
+    const duration = videoObj.duration;
+    if (!duration) throw new ApiError(400, "Video duration not available");
+
+    if (!progress) {
+      progress = new Progress({
+        courseID,
+        learnerID,
+        classID: material.classID,
+        materialID,
+        videoUrl,
+        watchedSeconds: 0,
+        watchedPercent: 0,
+        completed: false
+      });
+    }
+
+    if (watchedSeconds > progress.watchedSeconds) {
+      progress.watchedSeconds = watchedSeconds;
+      progress.watchedPercent = (watchedSeconds / duration) * 100;
+
+      if (progress.watchedPercent >= 80) {
+        progress.completed = true;
+        progress.completedAt = new Date();
+      }
+
+      await progress.save();
+    }
+  } else if (material.materialType === 'text' || material.materialType === 'audio' || material.materialType === 'image') {
+    // For text, audio, image - mark as completed directly
+    if (!progress) {
+      progress = await Progress.create({
+        courseID,
+        learnerID,
+        classID: material.classID,
+        materialID,
+        completed: true,
+        completedAt: new Date(),
+        watchedPercent: 100
+      });
+    } else if (!progress.completed) {
+      progress.completed = true;
+      progress.completedAt = new Date();
+      progress.watchedPercent = 100;
+      await progress.save();
+    }
+  }
+
+  // Update overall course progress
+  await updateCourseProgress(courseID, learnerID);
+
+  console.log("Progress updated successfully");
+  return res.status(200).json(
+    new ApiResponse(200, progress, "Progress updated successfully")
+  );
+});
 
 // Submit MCQ exam result
 const submitExamResult = AsynHandler(async (req, res) => {
@@ -87,6 +250,18 @@ const submitExamResult = AsynHandler(async (req, res) => {
 
   if (!courseID || !materialID || !answers) {
     throw new ApiError(400, "courseID, materialID, and answers are required");
+  }
+
+  // Verify enrollment
+  const enrollment = await Enroll.findOne({ courseID, learnerID });
+  if (!enrollment || enrollment.paymentStatus !== "paid") {
+    throw new ApiError(403, "You are not enrolled in this course");
+  }
+
+  // Check if material is unlocked
+  const isUnlocked = await checkMaterialUnlocked(courseID, materialID, learnerID);
+  if (!isUnlocked) {
+    throw new ApiError(403, "This exam is locked. Complete previous materials first.");
   }
 
   // Check if learner already took this exam
@@ -133,7 +308,7 @@ const submitExamResult = AsynHandler(async (req, res) => {
     learnerID,
     materialID,
     answers: processedAnswers,
-    score: Math.round(score * 100) / 100, // Round to 2 decimal places
+    score: Math.round(score * 100) / 100,
     totalQuestions,
     correctAnswers,
     timeTaken: timeTaken || 0
@@ -146,342 +321,178 @@ const submitExamResult = AsynHandler(async (req, res) => {
     progress = await Progress.create({
       courseID,
       learnerID,
+      classID: material.classID,
       materialID,
       completed: true,
+      completedAt: new Date(),
       watchedPercent: 100
     });
-  } else {
+  } else if (!progress.completed) {
     progress.completed = true;
+    progress.completedAt = new Date();
     progress.watchedPercent = 100;
     await progress.save();
   }
 
-  // Update course enrollment progress
-  const totalMaterials = await Material.countDocuments({ courseID });
-  const completedMaterials = await Progress.countDocuments({ courseID, learnerID, completed: true });
-  const courseProgress = (completedMaterials / totalMaterials) * 100;
+  // Update overall course progress
+  await updateCourseProgress(courseID, learnerID);
 
-  const enroll = await Enroll.findOneAndUpdate(
-    { courseID, learnerID },
-    { progress: courseProgress },
-    { new: true }
+  console.log("Exam submitted successfully");
+  return res.status(200).json(
+    new ApiResponse(200, { examResult, progress }, "Exam submitted successfully")
   );
-
-  if (courseProgress >= 100 && enroll && !enroll.certificateIssued) {
-    enroll.status = "completed";
-    await enroll.save({ validateBeforeSave: false });
-  }
-
-  return res
-    .status(201)
-    .json(
-      new ApiResponse(201, examResult, "Exam submitted successfully")
-    );
 });
 
+// Helper: Check if material is unlocked for learner
+async function checkMaterialUnlocked(courseID, materialID, learnerID) {
+  const material = await Material.findById(materialID);
+  if (!material) return false;
+
+  const classDoc = await Class.findById(material.classID);
+  if (!classDoc || !classDoc.isEnabled) return false;
+
+  // Get all classes in order
+  const allClasses = await Class.find({ courseID, isEnabled: true }).sort({ order: 1 });
+  const currentClassIndex = allClasses.findIndex(c => c._id.toString() === classDoc._id.toString());
+
+  // Check if all previous classes are completed
+  for (let i = 0; i < currentClassIndex; i++) {
+    const prevClass = allClasses[i];
+    const isCompleted = await isClassCompleted(prevClass._id, learnerID);
+    if (!isCompleted) {
+      return false; // Previous class not completed
+    }
+  }
+
+  // Get all materials in current class
+  const classMaterials = await Material.find({ classID: classDoc._id }).sort({ order: 1 });
+  const currentMaterialIndex = classMaterials.findIndex(m => m._id.toString() === materialID.toString());
+
+  // Check if all previous materials in class are completed
+  for (let i = 0; i < currentMaterialIndex; i++) {
+    const prevMaterial = classMaterials[i];
+    const isCompleted = await isMaterialCompleted(prevMaterial._id, learnerID);
+    if (!isCompleted) {
+      return false; // Previous material not completed
+    }
+  }
+
+  return true; // Material is unlocked
+}
+
+// Helper: Check if class is completed
+async function isClassCompleted(classID, learnerID) {
+  const classMaterials = await Material.find({ classID });
+  
+  for (const material of classMaterials) {
+    const isCompleted = await isMaterialCompleted(material._id, learnerID);
+    if (!isCompleted) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+// Helper: Check if material is completed
+async function isMaterialCompleted(materialID, learnerID) {
+  const material = await Material.findById(materialID);
+  if (!material) return false;
+
+  if (material.materialType === 'mcq') {
+    const examResult = await ExamResult.findOne({ materialID, learnerID });
+    return !!examResult;
+  } else {
+    const progress = await Progress.findOne({ materialID, learnerID, completed: true });
+    return !!progress;
+  }
+}
+
+// Helper: Update overall course progress
+async function updateCourseProgress(courseID, learnerID) {
+  // Only count materials from enabled classes
+  const enabledClasses = await Class.find({ courseID, isEnabled: true });
+  const enabledClassIDs = enabledClasses.map(c => c._id);
+  
+  const allMaterials = await Material.find({ 
+    courseID,
+    classID: { $in: enabledClassIDs }
+  });
+  
+  const totalMaterials = allMaterials.length;
+
+  if (totalMaterials === 0) return;
+
+  let completedCount = 0;
+  for (const material of allMaterials) {
+    const isCompleted = await isMaterialCompleted(material._id, learnerID);
+    if (isCompleted) {
+      completedCount++;
+    }
+  }
+
+  const progressPercent = (completedCount / totalMaterials) * 100;
+
+  const enroll = await Enroll.findOne({ courseID, learnerID });
+  if (enroll) {
+    enroll.progress = Math.round(progressPercent);
+    
+    if (progressPercent >= 100 && !enroll.certificateIssued) {
+      enroll.status = "completed";
+    }
+    
+    await enroll.save({ validateBeforeSave: false });
+  }
+}
 
 // Get exam result for a specific material
 const getExamResult = AsynHandler(async (req, res) => {
   const { materialID } = req.params;
   const learnerID = req.user?._id;
 
-  if (!materialID) {
-    throw new ApiError(400, "Material ID is required");
-  }
-
-  const examResult = await ExamResult.findOne({ learnerID, materialID })
-    .populate('materialID', 'title description')
-    .populate('courseID', 'title');
+  const examResult = await ExamResult.findOne({ materialID, learnerID });
 
   if (!examResult) {
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(200, null, "No exam result found")
-      );
-  }
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, examResult, "Exam result fetched successfully")
+    return res.status(200).json(
+      new ApiResponse(200, null, "No exam result found")
     );
-});
-
-
-// Get all exam results for a learner in a course
-const getCourseExamResults = AsynHandler(async (req, res) => {
-  const { courseID } = req.params;
-  const learnerID = req.user?._id;
-
-  if (!courseID) {
-    throw new ApiError(400, "Course ID is required");
   }
 
-  const examResults = await ExamResult.find({ learnerID, courseID })
-    .populate('materialID', 'title description')
-    .sort({ completedAt: -1 });
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, examResults, "Exam results fetched successfully")
-    );
-});
-
-
-// Check certificate eligibility
-const checkCertificateEligibility = AsynHandler(async (req, res) => {
-  const { courseID } = req.params;
-  const learnerID = req.user?._id;
-
-  if (!courseID) {
-    throw new ApiError(400, "Course ID is required");
-  }
-
-  // Get all materials in the course
-  const allMaterials = await Material.find({ courseID });
-  const videoMaterials = allMaterials.filter(m => m.materialType === 'video');
-  const mcqMaterials = allMaterials.filter(m => m.materialType === 'mcq');
-
-  // Check video completion (80% watched for each video)
-  let videoCompletionPercentage = 0;
-  if (videoMaterials.length > 0) {
-    const videoProgress = await Progress.find({
-      courseID,
-      learnerID,
-      materialID: { $in: videoMaterials.map(m => m._id) }
-    });
-
-    let totalWatchedPercentage = 0;
-    videoProgress.forEach(progress => {
-      totalWatchedPercentage += progress.watchedPercent || 0;
-    });
-
-    videoCompletionPercentage = videoProgress.length > 0 
-      ? totalWatchedPercentage / videoMaterials.length 
-      : 0;
-  } else {
-    // If no videos, consider it 100% complete
-    videoCompletionPercentage = 100;
-  }
-
-  // Check MCQ completion and calculate average score
-  let averageScore = 0;
-  let allMcqsCompleted = false;
-
-  if (mcqMaterials.length > 0) {
-    const examResults = await ExamResult.find({
-      courseID,
-      learnerID,
-      materialID: { $in: mcqMaterials.map(m => m._id) }
-    });
-
-    allMcqsCompleted = examResults.length === mcqMaterials.length;
-
-    if (examResults.length > 0) {
-      const totalScore = examResults.reduce((sum, result) => sum + result.score, 0);
-      averageScore = totalScore / examResults.length;
-    }
-  } else {
-    // If no MCQs, consider it complete with 100%
-    allMcqsCompleted = true;
-    averageScore = 100;
-  }
-
-  // Check eligibility
-  const videoRequirementMet = videoCompletionPercentage >= 80;
-  const mcqRequirementMet = allMcqsCompleted && averageScore >= 60;
-  const eligible = videoRequirementMet && mcqRequirementMet;
-
-  // Check if certificate already issued
-  const existingCertificate = await Certificate.findOne({ learnerID, courseID })
-    .populate('courseID', 'title')
-    .populate('learnerID', 'FullName Email');
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, {
-        eligible,
-        videoCompletionPercentage: Math.round(videoCompletionPercentage * 100) / 100,
-        videoRequirementMet,
-        averageScore: Math.round(averageScore * 100) / 100,
-        allMcqsCompleted,
-        mcqRequirementMet,
-        totalMcqs: mcqMaterials.length,
-        completedMcqs: await ExamResult.countDocuments({
-          courseID,
-          learnerID,
-          materialID: { $in: mcqMaterials.map(m => m._id) }
-        }),
-        certificateIssued: !!existingCertificate,
-        certificate: existingCertificate
-      }, "Certificate eligibility checked")
-    );
-});
-
-
-// Generate certificate
-const generateCertificate = AsynHandler(async (req, res) => {
-  const { courseID } = req.body;
-  const learnerID = req.user?._id;
-
-  if (!courseID) {
-    throw new ApiError(400, "Course ID is required");
-  }
-
-  // Check if certificate already exists
-  const existingCertificate = await Certificate.findOne({ learnerID, courseID });
-  if (existingCertificate) {
-    throw new ApiError(400, "Certificate already issued for this course");
-  }
-
-  // Get all materials in the course
-  const allMaterials = await Material.find({ courseID });
-  const videoMaterials = allMaterials.filter(m => m.materialType === 'video');
-  const mcqMaterials = allMaterials.filter(m => m.materialType === 'mcq');
-
-  // Check video completion
-  let videoCompletionPercentage = 0;
-  if (videoMaterials.length > 0) {
-    const videoProgress = await Progress.find({
-      courseID,
-      learnerID,
-      materialID: { $in: videoMaterials.map(m => m._id) }
-    });
-
-    let totalWatchedPercentage = 0;
-    videoProgress.forEach(progress => {
-      totalWatchedPercentage += progress.watchedPercent || 0;
-    });
-
-    videoCompletionPercentage = videoProgress.length > 0 
-      ? totalWatchedPercentage / videoMaterials.length 
-      : 0;
-  } else {
-    videoCompletionPercentage = 100;
-  }
-
-  if (videoCompletionPercentage < 80) {
-    throw new ApiError(400, `Video completion requirement not met. You have watched ${Math.round(videoCompletionPercentage)}% of videos. Minimum required: 80%`);
-  }
-
-  // Check MCQ completion and calculate average
-  let averageScore = 0;
-  if (mcqMaterials.length > 0) {
-    const examResults = await ExamResult.find({
-      courseID,
-      learnerID,
-      materialID: { $in: mcqMaterials.map(m => m._id) }
-    });
-
-    if (examResults.length !== mcqMaterials.length) {
-      throw new ApiError(400, `All MCQ exams must be completed. Completed: ${examResults.length}/${mcqMaterials.length}`);
-    }
-
-    const totalScore = examResults.reduce((sum, result) => sum + result.score, 0);
-    averageScore = totalScore / examResults.length;
-
-    if (averageScore < 60) {
-      throw new ApiError(400, `Average score requirement not met. Your average: ${Math.round(averageScore)}%. Minimum required: 60%`);
-    }
-  } else {
-    averageScore = 100;
-  }
-
-  // Generate certificate code
-  const certificateCode = `CERT-${courseID.toString().slice(-6).toUpperCase()}-${learnerID.toString().slice(-6).toUpperCase()}-${Date.now().toString().slice(-6)}`;
-
-  // Create certificate
-  const certificate = await Certificate.create({
-    courseID,
-    learnerID,
-    averageScore: Math.round(averageScore * 100) / 100,
-    videoCompletionPercentage: Math.round(videoCompletionPercentage * 100) / 100,
-    certificateCode
-  });
-
-  // Update enrollment
-  await Enroll.findOneAndUpdate(
-    { courseID, learnerID },
-    { 
-      certificateIssued: true,
-      certificateID: certificate._id,
-      status: 'completed'
-    }
+  return res.status(200).json(
+    new ApiResponse(200, examResult, "Exam result fetched successfully")
   );
-
-  // Populate certificate data
-  const populatedCertificate = await Certificate.findById(certificate._id)
-    .populate('courseID', 'title')
-    .populate('learnerID', 'FullName Email');
-
-  return res
-    .status(201)
-    .json(
-      new ApiResponse(201, populatedCertificate, "Certificate generated successfully")
-    );
 });
 
-
-// Get certificate by ID
-const getCertificate = AsynHandler(async (req, res) => {
-  const { certificateID } = req.params;
-
-  if (!certificateID) {
-    throw new ApiError(400, "Certificate ID is required");
-  }
-
-  const certificate = await Certificate.findById(certificateID)
-    .populate({
-      path: 'courseID',
-      select: 'title',
-      populate: {
-        path: 'owner',
-        select: 'FullName'
-      }
-    })
-    .populate('learnerID', 'FullName Email');
-
-  if (!certificate) {
-    throw new ApiError(404, "Certificate not found");
-  }
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, certificate, "Certificate fetched successfully")
-    );
-});
-
-
-// Get all certificates for a learner
-const getMyCertificates = AsynHandler(async (req, res) => {
+// Get learner progress for a course
+const getLearnerProgress = AsynHandler(async (req, res) => {
+  const { courseID } = req.params;
   const learnerID = req.user?._id;
 
-  if (!learnerID) {
-    throw new ApiError(401, "User not authenticated");
+  const enrollment = await Enroll.findOne({ courseID, learnerID });
+  if (!enrollment) {
+    throw new ApiError(404, "Enrollment not found");
   }
 
-  const certificates = await Certificate.find({ learnerID })
-    .populate({
-      path: 'courseID',
-      select: 'title courseImage',
-      populate: {
-        path: 'owner',
-        select: 'FullName'
-      }
-    })
-    .populate('learnerID', 'FullName Email')
-    .sort({ issuedAt: -1 });
+  const progressRecords = await Progress.find({ courseID, learnerID })
+    .populate('materialID', 'title materialType')
+    .populate('classID', 'title order');
 
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, certificates, "Certificates fetched successfully")
-    );
+  const examResults = await ExamResult.find({ courseID, learnerID })
+    .populate('materialID', 'title materialType');
+
+  return res.status(200).json(
+    new ApiResponse(200, {
+      enrollment,
+      progressRecords,
+      examResults
+    }, "Learner progress fetched successfully")
+  );
 });
 
-
-export { updateProgress, submitExamResult, getExamResult, getCourseExamResults, checkCertificateEligibility, generateCertificate, getCertificate, getMyCertificates }
+export {
+  getCourseStructure,
+  updateProgress,
+  submitExamResult,
+  getExamResult,
+  getLearnerProgress
+};

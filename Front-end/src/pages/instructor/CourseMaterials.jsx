@@ -24,12 +24,14 @@ const CourseMaterials = () => {
   const [uploading, setUploading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [currentMaterial, setCurrentMaterial] = useState(null);
+  const [hasFinalExam, setHasFinalExam] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     type: MaterialType.TEXT,
     content: '',
     file: null,
+    isFinalExam: false,
     mcqData: [
       {
         question: '',
@@ -71,7 +73,24 @@ const CourseMaterials = () => {
       
       // Fetch materials for this course
       const materialsRes = await materialAPI.getMaterialsByCourse(courseId);
-      setMaterials(materialsRes.data.data || []);
+      const responseData = materialsRes.data.data;
+      
+      // Handle new structured format or old flat format
+      let materialsArray = [];
+      if (responseData.materials) {
+        // New format with structured data
+        materialsArray = responseData.materials || [];
+      } else {
+        // Old format - flat array
+        materialsArray = responseData || [];
+      }
+      
+      setMaterials(materialsArray);
+      
+      // Check if final exam exists
+      const finalExamExists = materialsArray.some(m => m.isFinalExam === true);
+      setHasFinalExam(finalExamExists);
+      
       setLoading(false);
     } catch (error) {
       console.error('Error fetching course:', error);
@@ -141,6 +160,7 @@ const CourseMaterials = () => {
       type: MaterialType.TEXT,
       content: '',
       file: null,
+      isFinalExam: false,
       mcqData: [
         {
           question: '',
@@ -217,6 +237,7 @@ const CourseMaterials = () => {
       submitData.append('title', formData.title);
       submitData.append('description', formData.description);
       submitData.append('materialType', formData.type);
+      submitData.append('isFinalExam', formData.isFinalExam);
       
       if (formData.type === MaterialType.TEXT) {
         submitData.append('text', formData.content);
@@ -304,6 +325,7 @@ const CourseMaterials = () => {
       type: material.materialType || MaterialType.TEXT,
       content: material.text || '',
       file: null,
+      isFinalExam: material.isFinalExam || false,
       mcqData: mcqData,
       mcqDuration: material.mcqDuration || material.questions?.length || 5
     });
@@ -369,10 +391,16 @@ const CourseMaterials = () => {
                 {course?.title}
               </h1>
               <p className="text-gray-600">Manage course materials</p>
+              {hasFinalExam && (
+                <div className="mt-2 text-sm text-yellow-600 font-medium">
+                  ⚠️ Course has ended - Final exam uploaded
+                </div>
+              )}
             </div>
             <button
               onClick={() => setShowModal(true)}
               className="btn-primary"
+              disabled={hasFinalExam && !currentMaterial}
             >
               <FaPlus className="inline mr-2" />
               Add Material
@@ -397,9 +425,16 @@ const CourseMaterials = () => {
                       {getMaterialIcon(material.materialType)}
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-xl font-bold text-gray-900 mb-1">
-                        {material.title}
-                      </h3>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-xl font-bold text-gray-900">
+                          {material.title}
+                        </h3>
+                        {material.isFinalExam && (
+                          <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded font-semibold">
+                            🏆 FINAL EXAM
+                          </span>
+                        )}
+                      </div>
                       <p className="text-gray-600 mb-2">{material.description}</p>
                       <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
                         {material.materialType?.toUpperCase() || 'UNKNOWN'}
@@ -496,6 +531,23 @@ const CourseMaterials = () => {
                       <option value={MaterialType.AUDIO}>Audio</option>
                       <option value={MaterialType.MCQ}>MCQ</option>
                     </select>
+                  </div>
+
+                  {/* Final Exam Checkbox */}
+                  <div className="flex items-start gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <input
+                      type="checkbox"
+                      id="isFinalExam"
+                      checked={formData.isFinalExam}
+                      onChange={(e) => setFormData({ ...formData, isFinalExam: e.target.checked })}
+                      className="mt-1"
+                    />
+                    <label htmlFor="isFinalExam" className="text-sm text-gray-700">
+                      <span className="font-semibold">Mark as Final Exam</span>
+                      <p className="text-xs text-gray-600 mt-1">
+                        ⚠️ Warning: Once a final exam is uploaded, no more materials can be added to this course. The course will end after the final exam.
+                      </p>
+                    </label>
                   </div>
 
                   {/* Text Content */}

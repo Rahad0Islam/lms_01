@@ -5,7 +5,7 @@ import { jwtVerification } from "../Middleware/Authentication.Middleware.js";
 import { addCourse, courseEnroll, pendingCourseList, allCourseList, enrolledCourseList, availabeCourseList, getCourseById, getInstructorCourses, getInstructorPendingEnrollments, rateCourse, getCourseRating } from "../Controllers/Course.controller.js";
 import { addMaterial, getAllmaterialList, updateMaterial, deleteMaterial } from "../Controllers/material.controller.js";
 import { approvedCourse, approvedEnroll, issueCertificate, getPendingEnrollments } from "../Controllers/admin.controller.js";
-import { updateProgress, submitExamResult, getExamResult, getCourseExamResults, checkCertificateEligibility, generateCertificate, getCertificate, getMyCertificates } from "../Controllers/progress.controller.js";
+import { getCourseStructure, updateProgress, submitExamResult, getExamResult, getLearnerProgress } from "../Controllers/progress.controller.js";
 const router=Router();
 
 
@@ -50,6 +50,9 @@ router.route("/pendingEnrollments").get(jwtVerification, getPendingEnrollments);
 
 router.route("/getAllmaterialList").post(jwtVerification,getAllmaterialList)
 
+// New progress routes with sequential locking
+router.route("/structure/:courseID").get(jwtVerification, getCourseStructure);
+router.route("/learnerProgress/:courseID").get(jwtVerification, getLearnerProgress);
 router.route("/updateProgress").post(jwtVerification,updateProgress)
 router.route("/issueCertificate").post(jwtVerification,issueCertificate)
 
@@ -105,13 +108,12 @@ router.route("/rating/:courseID").get(jwtVerification, getCourseRating);
 // Exam routes
 router.route("/submitExam").post(jwtVerification, submitExamResult);
 router.route("/examResult/:materialID").get(jwtVerification, getExamResult);
-router.route("/courseExamResults/:courseID").get(jwtVerification, getCourseExamResults);
 
-// Certificate routes
-router.route("/certificateEligibility/:courseID").get(jwtVerification, checkCertificateEligibility);
-router.route("/generateCertificate").post(jwtVerification, generateCertificate);
-router.route("/certificate/:certificateID").get(jwtVerification, getCertificate);
-router.route("/myCertificates").get(jwtVerification, getMyCertificates);
+// Certificate routes - Keep from old controller if they exist
+// router.route("/certificateEligibility/:courseID").get(jwtVerification, checkCertificateEligibility);
+// router.route("/generateCertificate").post(jwtVerification, generateCertificate);
+// router.route("/certificate/:certificateID").get(jwtVerification, getCertificate);
+// router.route("/myCertificates").get(jwtVerification, getMyCertificates);
 
 // Course by ID route - MUST be last to avoid catching other routes
 router.route("/:id").get(jwtVerification, getCourseById);

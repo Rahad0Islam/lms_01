@@ -118,10 +118,21 @@ export const adminAPI = {
 
 // Progress API
 export const progressAPI = {
+  getCourseStructure: (courseID) => api.get(`/course/structure/${courseID}`),
+  getLearnerProgress: (courseID) => api.get(`/course/learnerProgress/${courseID}`),
   updateProgress: (data) => api.post('/course/updateProgress', data),
   submitExam: (data) => api.post('/course/submitExam', data),
   getExamResult: (materialID) => api.get(`/course/examResult/${materialID}`),
-  getCourseExamResults: (courseID) => api.get(`/course/courseExamResults/${courseID}`),
+};
+
+// Class API
+export const classAPI = {
+  addClass: (data) => api.post('/class/add', data),
+  getClassesByCourse: (courseID) => api.get(`/class/course/${courseID}`),
+  updateClass: (classID, data) => api.patch(`/class/${classID}`, data),
+  deleteClass: (classID) => api.delete(`/class/${classID}`),
+  reorderClasses: (data) => api.post('/class/reorder', data),
+  enableFinalExam: (classID) => api.patch(`/class/enable-final/${classID}`),
 };
 
 // Certificate API
