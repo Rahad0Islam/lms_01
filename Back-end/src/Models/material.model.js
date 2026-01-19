@@ -31,7 +31,7 @@ const materialSchema=new mongoose.Schema({
   
   materialType:{
      type:String,
-     enum:['text','audio','mcq','video','image'],
+     enum:['text','audio','mcq','video','image','pdf'],
      required:true  
   },
  
@@ -54,6 +54,11 @@ const materialSchema=new mongoose.Schema({
      }],
 
       audio:[{
+        url:{type:String},
+        publicId:{type:String}
+      }],
+
+      pdf:[{
         url:{type:String},
         publicId:{type:String}
       }],

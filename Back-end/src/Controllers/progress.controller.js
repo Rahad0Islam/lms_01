@@ -93,6 +93,7 @@ const getCourseStructure = AsynHandler(async (req, res) => {
           picture: material.picture,
           video: material.video,
           audio: material.audio,
+          pdf: material.pdf,
           questions: material.materialType === 'mcq' ? material.questions : undefined,
           mcqDuration: material.mcqDuration
         })
@@ -146,10 +147,21 @@ const getCourseStructure = AsynHandler(async (req, res) => {
   
   const overallProgress = totalMaterials > 0 ? (completedMaterialsCount / totalMaterials) * 100 : 0;
 
+  // Update enrollment progress to reflect current state
+  if (enrollment) {
+    enrollment.progress = Math.round(overallProgress);
+    if (overallProgress >= 100 && !enrollment.certificateIssued) {
+      enrollment.status = "completed";
+    } else if (overallProgress < 100 && enrollment.status === "completed") {
+      enrollment.status = "active"; // Reset to active if new materials added
+    }
+    await enrollment.save({ validateBeforeSave: false });
+  }
+
   return res.status(200).json(
     new ApiResponse(200, {
       structure,
-      overallProgress,
+      overallProgress: Math.round(overallProgress),
       enrollment
     }, "Course structure with lock status fetched successfully")
   );
@@ -214,8 +226,26 @@ const updateProgress = AsynHandler(async (req, res) => {
 
       await progress.save();
     }
-  } else if (material.materialType === 'text' || material.materialType === 'audio' || material.materialType === 'image') {
-    // For text, audio, image - mark as completed directly
+  } else if (material.materialType === 'text' || material.materialType === 'audio' || material.materialType === 'image' || material.materialType === 'pdf') {
+    // For text, audio, image, pdf - mark as completed directly
+    if (!progress) {
+      progress = await Progress.create({
+        courseID,
+        learnerID,
+        classID: material.classID,
+        materialID,
+        completed: true,
+        completedAt: new Date(),
+        watchedPercent: 100
+      });
+    } else if (!progress.completed) {
+      progress.completed = true;
+      progress.completedAt = new Date();
+      progress.watchedPercent = 100;
+      await progress.save();
+    }
+  } else if (material.materialType === 'video' && !videoUrl) {
+    // Video marked as completed manually (no videoUrl provided)
     if (!progress) {
       progress = await Progress.create({
         courseID,
@@ -349,10 +379,25 @@ async function checkMaterialUnlocked(courseID, materialID, learnerID) {
   if (!material) return false;
 
   const classDoc = await Class.findById(material.classID);
-  if (!classDoc || !classDoc.isEnabled) return false;
+  if (!classDoc) return false;
+
+  // Special handling for final exam materials
+  if (material.isFinalExam) {
+    // Final exam unlocks only when all regular (non-final-exam) materials are completed
+    const allMaterials = await Material.find({ courseID });
+    const regularMaterials = allMaterials.filter(m => !m.isFinalExam);
+    
+    for (const regMaterial of regularMaterials) {
+      const isCompleted = await isMaterialCompleted(regMaterial._id, learnerID);
+      if (!isCompleted) {
+        return false; // Not all regular materials completed
+      }
+    }
+    return true; // All regular materials completed, final exam unlocked
+  }
 
   // Get all classes in order
-  const allClasses = await Class.find({ courseID, isEnabled: true }).sort({ order: 1 });
+  const allClasses = await Class.find({ courseID }).sort({ order: 1 });
   const currentClassIndex = allClasses.findIndex(c => c._id.toString() === classDoc._id.toString());
 
   // Check if all previous classes are completed
@@ -364,8 +409,8 @@ async function checkMaterialUnlocked(courseID, materialID, learnerID) {
     }
   }
 
-  // Get all materials in current class
-  const classMaterials = await Material.find({ classID: classDoc._id }).sort({ order: 1 });
+  // Get all materials in current class (excluding final exam materials)
+  const classMaterials = await Material.find({ classID: classDoc._id, isFinalExam: { $ne: true } }).sort({ order: 1 });
   const currentMaterialIndex = classMaterials.findIndex(m => m._id.toString() === materialID.toString());
 
   // Check if all previous materials in class are completed
@@ -382,7 +427,8 @@ async function checkMaterialUnlocked(courseID, materialID, learnerID) {
 
 // Helper: Check if class is completed
 async function isClassCompleted(classID, learnerID) {
-  const classMaterials = await Material.find({ classID });
+  // Only check regular materials, exclude final exams from class completion
+  const classMaterials = await Material.find({ classID, isFinalExam: { $ne: true } });
   
   for (const material of classMaterials) {
     const isCompleted = await isMaterialCompleted(material._id, learnerID);
@@ -410,18 +456,23 @@ async function isMaterialCompleted(materialID, learnerID) {
 
 // Helper: Update overall course progress
 async function updateCourseProgress(courseID, learnerID) {
-  // Only count materials from enabled classes
-  const enabledClasses = await Class.find({ courseID, isEnabled: true });
-  const enabledClassIDs = enabledClasses.map(c => c._id);
-  
+  // Only count regular materials (exclude final exam materials)
   const allMaterials = await Material.find({ 
     courseID,
-    classID: { $in: enabledClassIDs }
+    isFinalExam: { $ne: true }
   });
   
   const totalMaterials = allMaterials.length;
 
-  if (totalMaterials === 0) return;
+  // If no regular materials, progress is 0
+  if (totalMaterials === 0) {
+    const enroll = await Enroll.findOne({ courseID, learnerID });
+    if (enroll) {
+      enroll.progress = 0;
+      await enroll.save({ validateBeforeSave: false });
+    }
+    return;
+  }
 
   let completedCount = 0;
   for (const material of allMaterials) {

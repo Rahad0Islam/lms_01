@@ -8,6 +8,7 @@ import {
   FaBook, 
   FaArrowLeft, 
   FaFileAlt, 
+  FaFilePdf,
   FaVideo, 
   FaImage, 
   FaMusic, 
@@ -27,7 +28,8 @@ const MaterialType = {
   VIDEO: 'video',
   IMAGE: 'image',
   AUDIO: 'audio',
-  MCQ: 'mcq'
+  MCQ: 'mcq',
+  PDF: 'pdf'
 };
 
 const CourseLearning = () => {
@@ -247,6 +249,7 @@ const CourseLearning = () => {
       case MaterialType.IMAGE: return <FaImage />;
       case MaterialType.AUDIO: return <FaMusic />;
       case MaterialType.MCQ: return <FaQuestionCircle />;
+      case MaterialType.PDF: return <FaFilePdf />;
       default: return <FaBook />;
     }
   };
@@ -271,7 +274,7 @@ const CourseLearning = () => {
       );
     }
 
-    const { materialType, text, video, audio, picture, questions, examResult } = selectedMaterial;
+    const { materialType, text, video, audio, picture, pdf, questions, examResult } = selectedMaterial;
 
     switch (materialType) {
       case MaterialType.TEXT:
@@ -331,6 +334,14 @@ const CourseLearning = () => {
                 ))}
               </div>
             )}
+            {!selectedMaterial.isCompleted && (
+              <button
+                onClick={() => markAsCompleted(MaterialType.VIDEO)}
+                className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Mark as Completed
+              </button>
+            )}
           </div>
         );
 
@@ -360,6 +371,57 @@ const CourseLearning = () => {
             {!selectedMaterial.isCompleted && (
               <button
                 onClick={() => markAsCompleted(MaterialType.AUDIO)}
+                className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Mark as Completed
+              </button>
+            )}
+          </div>
+        );
+
+      case MaterialType.PDF:
+        return (
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+              {selectedMaterial.isFinalExam && (
+                <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                  🏆 FINAL EXAM
+                </span>
+              )}
+            </div>
+            {selectedMaterial.description && (
+              <p className="text-gray-600 mb-4">{selectedMaterial.description}</p>
+            )}
+            {selectedMaterial.pdf && selectedMaterial.pdf.length > 0 && (
+              <div className="space-y-4">
+                {selectedMaterial.pdf.map((pdfFile, index) => (
+                  <div key={index} className="border rounded-lg overflow-hidden">
+                    <iframe
+                      src={pdfFile.url}
+                      className="w-full"
+                      style={{ height: '600px' }}
+                      title={`PDF ${index + 1}`}
+                    >
+                      Your browser does not support PDF viewing.
+                    </iframe>
+                    <div className="p-3 bg-gray-50 border-t">
+                      <a
+                        href={pdfFile.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        Open PDF in new tab
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!selectedMaterial.isCompleted && (
+              <button
+                onClick={() => markAsCompleted(MaterialType.PDF)}
                 className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
               >
                 Mark as Completed
@@ -530,6 +592,55 @@ const CourseLearning = () => {
             >
               {submittingExam ? 'Submitting...' : 'Submit Exam'}
             </button>
+          </div>
+        );
+
+      case MaterialType.PDF:
+        return (
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-2xl font-bold">{selectedMaterial.title}</h2>
+              {selectedMaterial.isFinalExam && (
+                <span className="text-sm bg-yellow-100 text-yellow-800 px-3 py-1 rounded font-semibold">
+                  🏆 FINAL EXAM
+                </span>
+              )}
+            </div>
+            {selectedMaterial.description && (
+              <p className="text-gray-600 mb-4">{selectedMaterial.description}</p>
+            )}
+            {pdf && pdf.length > 0 && (
+              <div className="space-y-4">
+                {pdf.map((pdfFile, index) => (
+                  <div key={index} className="border rounded-lg overflow-hidden">
+                    <div className="bg-gray-100 p-3 flex justify-between items-center">
+                      <span className="font-medium">PDF Document {index + 1}</span>
+                      <a
+                        href={pdfFile.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                      >
+                        Open in New Tab →
+                      </a>
+                    </div>
+                    <iframe
+                      src={pdfFile.url}
+                      className="w-full h-[600px]"
+                      title={`PDF ${index + 1}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            {!selectedMaterial.isCompleted && (
+              <button
+                onClick={() => markAsCompleted(MaterialType.PDF)}
+                className="mt-6 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Mark as Completed
+              </button>
+            )}
           </div>
         );
 

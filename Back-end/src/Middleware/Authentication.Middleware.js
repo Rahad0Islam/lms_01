@@ -15,16 +15,29 @@ const jwtVerification=AsynHandler(async(req,res,next)=>{
        }
      }
  
-     if(!Token)throw new ApiError(401,"Authentication error! ");
+     if(!Token){
+       console.log("No token found in request");
+       throw new ApiError(401,"Authentication error! ");
+     }
      
      const DecodeToken=jwt.verify(Token,process.env.ACCESS_TOKEN_SECRET);
      const user=await User.findById(DecodeToken?._id).select("-Password -RefreshToken")
  
  
-     if(!user)throw new ApiError(401,"Invalid access token !")
+     if(!user){
+       console.log("User not found for token:", DecodeToken?._id);
+       throw new ApiError(401,"Invalid access token !")
+     }
      req.user=user;
       next()
    } catch (error) {
+     console.log("JWT Verification Error:", error.message);
+     if (error.name === 'TokenExpiredError') {
+       throw new ApiError(401, "Access token expired!")
+     }
+     if (error.name === 'JsonWebTokenError') {
+       throw new ApiError(401, "Invalid access token!")
+     }
      throw new ApiError(401,"Invalid access token !")
    }
 

@@ -132,13 +132,27 @@ const addMaterial=AsynHandler(async(req,res)=>{
         }
     }
 
+    const pdfLocalPath=[];
+    const pdfFiles = Array.isArray(req.files?.pdf) ? req.files.pdf : [];
+    for (const pdfFile of pdfFiles) {
+        try {
+            const LocalPath = await FileUpload(pdfFile.path);
+            if(LocalPath){
+                pdfLocalPath.push({ url: LocalPath.url, publicId: LocalPath.public_id });
+            }
+        } catch (e) {
+            console.error('PDF upload failed:', e?.message || e);
+        }
+    }
+
       if ((!text || text.trim() === "") &&
         pictureLocalPath.length === 0 &&
         videoLocalPath.length === 0 &&
         audioLocalPath.length===0 &&
+        pdfLocalPath.length===0 &&
         mcq.length===0
       ) {
-     throw new ApiError(400, "upload must contain at least one of: text or  picture or audio or video or mcq");
+     throw new ApiError(400, "upload must contain at least one of: text or  picture or audio or video or pdf or mcq");
   }
 
     let questions = [];
@@ -167,6 +181,7 @@ const addMaterial=AsynHandler(async(req,res)=>{
      picture:pictureLocalPath,
      video:videoLocalPath,
      audio:audioLocalPath,
+     pdf:pdfLocalPath,
      questions,
      mcqDuration: mcqDuration || questions.length || 5,
      isFinalExam: isFinalExam === 'true' || isFinalExam === true,

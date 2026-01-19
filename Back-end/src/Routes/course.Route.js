@@ -35,6 +35,10 @@ router.route("/contentUpload").post(
            {
             name:"picture",
             maxCount:10
+        },
+        {
+            name:"pdf",
+            maxCount:10
         }
          
     ]),
@@ -77,6 +81,10 @@ router.route("/updateMaterial").post(jwtVerification,
            {
             name:"picture",
             maxCount:10
+        },
+        {
+            name:"pdf",
+            maxCount:10
         }
          
     ]),
@@ -94,6 +102,10 @@ router.route("/material/:materialId").patch(jwtVerification,
         },
            {
             name:"picture",
+            maxCount:10
+        },
+        {
+            name:"pdf",
             maxCount:10
         }
          

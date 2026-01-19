@@ -36,16 +36,31 @@ api.interceptors.response.use(
 
       try {
         const refreshToken = localStorage.getItem('refreshToken');
+        
+        if (!refreshToken) {
+          console.log('No refresh token found, redirecting to login');
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+          localStorage.removeItem('user');
+          window.location.href = '/login';
+          return Promise.reject(error);
+        }
+
+        console.log('Attempting to refresh access token...');
         const response = await axios.post(`${API_BASE_URL}/users/renewaccestoken`, {
           RefreshToken: refreshToken,
+        }, {
+          withCredentials: true
         });
 
         const { AccessToken } = response.data.data;
         localStorage.setItem('accessToken', AccessToken);
+        console.log('Access token refreshed successfully');
 
         originalRequest.headers.Authorization = `Bearer ${AccessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
+        console.log('Token refresh failed:', refreshError.response?.data?.message || refreshError.message);
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         localStorage.removeItem('user');

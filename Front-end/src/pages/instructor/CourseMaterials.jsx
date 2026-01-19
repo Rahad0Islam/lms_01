@@ -11,7 +11,8 @@ const MaterialType = {
   VIDEO: 'video',
   IMAGE: 'image',
   AUDIO: 'audio',
-  MCQ: 'mcq'
+  MCQ: 'mcq',
+  PDF: 'pdf'
 };
 
 const CourseMaterials = () => {
@@ -224,7 +225,7 @@ const CourseMaterials = () => {
       }
     }
 
-    if ([MaterialType.VIDEO, MaterialType.IMAGE, MaterialType.AUDIO].includes(formData.type) && !formData.file && !currentMaterial) {
+    if ([MaterialType.VIDEO, MaterialType.IMAGE, MaterialType.AUDIO, MaterialType.PDF].includes(formData.type) && !formData.file && !currentMaterial) {
       toast.error(`Please upload a ${formData.type} file`);
       return;
     }
@@ -260,6 +261,8 @@ const CourseMaterials = () => {
           submitData.append('picture', formData.file);
         } else if (formData.type === MaterialType.AUDIO) {
           submitData.append('audio', formData.file);
+        } else if (formData.type === MaterialType.PDF) {
+          submitData.append('pdf', formData.file);
         }
       }
 
@@ -358,6 +361,8 @@ const CourseMaterials = () => {
         return <FaMusic className="text-purple-500" />;
       case MaterialType.MCQ:
         return <FaQuestionCircle className="text-orange-500" />;
+      case MaterialType.PDF:
+        return <FaFileAlt className="text-red-500" />;
       default:
         return <FaFileAlt />;
     }
@@ -529,6 +534,7 @@ const CourseMaterials = () => {
                       <option value={MaterialType.VIDEO}>Video</option>
                       <option value={MaterialType.IMAGE}>Image</option>
                       <option value={MaterialType.AUDIO}>Audio</option>
+                      <option value={MaterialType.PDF}>PDF</option>
                       <option value={MaterialType.MCQ}>MCQ</option>
                     </select>
                   </div>
@@ -569,7 +575,7 @@ const CourseMaterials = () => {
                   )}
 
                   {/* File Upload */}
-                  {[MaterialType.VIDEO, MaterialType.IMAGE, MaterialType.AUDIO].includes(formData.type) && (
+                  {[MaterialType.VIDEO, MaterialType.IMAGE, MaterialType.AUDIO, MaterialType.PDF].includes(formData.type) && (
                     <div>
                       <label className="block text-gray-700 font-semibold mb-2">
                         Upload File {!currentMaterial && '*'}
@@ -583,7 +589,11 @@ const CourseMaterials = () => {
                             ? 'video/*'
                             : formData.type === MaterialType.IMAGE
                             ? 'image/*'
-                            : 'audio/*'
+                            : formData.type === MaterialType.AUDIO
+                            ? 'audio/*'
+                            : formData.type === MaterialType.PDF
+                            ? 'application/pdf,.pdf'
+                            : '*'
                         }
                         required={!currentMaterial}
                       />
