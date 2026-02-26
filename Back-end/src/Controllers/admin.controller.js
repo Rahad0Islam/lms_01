@@ -11,7 +11,7 @@ import { Bank } from "../Models/bank.model.js";
 import { Certificate } from "../Models/certificate.model.js";
 
 const approvedEnroll=AsynHandler(async(req,res)=>{
-    
+  
     const{courseID,learnerID,transactionID}=req.body;
 
     if(!courseID || !learnerID || !transactionID){
@@ -46,8 +46,6 @@ const approvedEnroll=AsynHandler(async(req,res)=>{
         throw new ApiError(401,"payment already accepted")
     }
 
-    
-    
     const enroll=await  Enroll.findOne({
           courseID,learnerID
     })
@@ -89,7 +87,7 @@ const approvedEnroll=AsynHandler(async(req,res)=>{
     instructorBank.status="success";
     await teacher.save({validateBeforeSave:false})
 
-}
+  }
 
  
     await course.save({validateBeforeSave:false})
@@ -169,9 +167,6 @@ const approvedCourse=AsynHandler(async(req,res)=>{
     .json(
         new ApiResponse(201,(bankCheck?bankCheck:null),"Course approved and salary given succesfully")
     )
-
-
-
 })
 
 

@@ -152,10 +152,17 @@ export const classAPI = {
 
 // Certificate API
 export const certificateAPI = {
+  // Student endpoints
   checkEligibility: (courseID) => api.get(`/course/certificateEligibility/${courseID}`),
-  generateCertificate: (data) => api.post('/course/generateCertificate', data),
+  requestCertificate: (courseID) => api.post('/course/requestCertificate', { courseID }),
+  getMyCertificates: (status) => api.get('/course/myCertificates', { params: { status } }),
   getCertificate: (certificateID) => api.get(`/course/certificate/${certificateID}`),
-  getMyCertificates: () => api.get('/course/myCertificates'),
+  
+  // Admin endpoints
+  getPendingRequests: () => api.get('/course/pendingCertificates'),
+  getAllRequests: (params) => api.get('/course/allCertificates', { params }),
+  approveCertificate: (certificateID) => api.patch(`/course/approveCertificate/${certificateID}`),
+  rejectCertificate: (certificateID, reason) => api.patch(`/course/rejectCertificate/${certificateID}`, { reason }),
 };
 
 export default api;

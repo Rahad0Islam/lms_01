@@ -21,16 +21,28 @@ const certificateSchema = new mongoose.Schema({
     max: 100
   },
 
-  videoCompletionPercentage: {
-    type: Number,
-    required: true,
-    min: 0,
-    max: 100
+  status: {
+    type: String,
+    enum: ["pending", "approved", "rejected"],
+    default: "pending"
+  },
+
+  requestedAt: {
+    type: Date,
+    default: Date.now
   },
 
   issuedAt: {
-    type: Date,
-    default: Date.now
+    type: Date
+  },
+
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User"
+  },
+
+  rejectionReason: {
+    type: String
   },
 
   certificateCode: {

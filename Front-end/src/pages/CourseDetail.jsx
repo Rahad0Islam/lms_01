@@ -61,9 +61,12 @@ const CourseDetail = () => {
         // Check certificate eligibility
         try {
           const certRes = await certificateAPI.checkEligibility(id);
-          setCertificateEligibility(certRes.data.data);
+          if (certRes.data.data) {
+            setCertificateEligibility(certRes.data.data);
+          }
         } catch (err) {
-          console.error('Error checking certificate eligibility:', err);
+          // Certificate eligibility check failed, silently ignore
+          console.log('Certificate eligibility check skipped');
         }
       }
       
@@ -149,13 +152,12 @@ const CourseDetail = () => {
   const handleGenerateCertificate = async () => {
     setGeneratingCertificate(true);
     try {
-      const response = await certificateAPI.generateCertificate({ courseID: id });
-      const certificate = response.data.data;
-      toast.success('Certificate generated successfully!');
-      navigate(`/certificate/${certificate._id}`);
+      await certificateAPI.requestCertificate(id);
+      toast.success('Certificate requested successfully! Please wait for admin approval.');
+      navigate('/certificates');
     } catch (error) {
-      console.error('Error generating certificate:', error);
-      toast.error(error.response?.data?.message || 'Failed to generate certificate');
+      console.error('Error requesting certificate:', error);
+      toast.error(error.response?.data?.message || 'Failed to request certificate');
     } finally {
       setGeneratingCertificate(false);
     }
@@ -300,7 +302,7 @@ const CourseDetail = () => {
                             {/* Certificate Section */}
                             {certificateEligibility && (
                               <div className="mt-4">
-                                {certificateEligibility.certificateIssued ? (
+                                {certificateEligibility.certificate && certificateEligibility.certificate.status === 'approved' ? (
                                   <button
                                     onClick={() => navigate(`/certificate/${certificateEligibility.certificate._id}`)}
                                     className="w-full bg-gradient-to-r from-yellow-400 to-yellow-600 text-white font-semibold py-3 rounded-lg hover:from-yellow-500 hover:to-yellow-700 transition-all shadow-lg"
@@ -308,6 +310,12 @@ const CourseDetail = () => {
                                     <FaCertificate className="inline mr-2" />
                                     View Certificate
                                   </button>
+                                ) : certificateEligibility.certificate && certificateEligibility.certificate.status === 'pending' ? (
+                                  <div className="bg-yellow-50 border border-yellow-300 p-3 rounded-lg text-center">
+                                    <p className="text-yellow-800 font-semibold text-sm">
+                                      ⏳ Certificate request pending approval
+                                    </p>
+                                  </div>
                                 ) : certificateEligibility.eligible ? (
                                   <button
                                     onClick={handleGenerateCertificate}
@@ -315,35 +323,23 @@ const CourseDetail = () => {
                                     className="w-full bg-gradient-to-r from-green-400 to-green-600 text-white font-semibold py-3 rounded-lg hover:from-green-500 hover:to-green-700 transition-all shadow-lg disabled:opacity-50"
                                   >
                                     <FaCertificate className="inline mr-2" />
-                                    {generatingCertificate ? 'Generating...' : 'Generate Certificate'}
+                                    {generatingCertificate ? 'Requesting...' : 'Request Certificate'}
                                   </button>
-                                ) : (
+                                ) : certificateEligibility.requirements ? (
                                   <div className="bg-yellow-50 border border-yellow-300 p-3 rounded-lg">
                                     <p className="text-yellow-800 font-semibold text-sm mb-2">
                                       📜 Certificate Requirements:
                                     </p>
                                     <ul className="text-yellow-700 text-xs space-y-1">
                                       <li className="flex items-center">
-                                        {certificateEligibility.videoRequirementMet ? '✅' : '❌'}
+                                        {certificateEligibility.requirements.finalExamCompleted ? '✅' : '❌'}
                                         <span className="ml-2">
-                                          Watch 80% of videos ({certificateEligibility.videoCompletionPercentage.toFixed(1)}% completed)
-                                        </span>
-                                      </li>
-                                      <li className="flex items-center">
-                                        {certificateEligibility.allMcqsCompleted ? '✅' : '❌'}
-                                        <span className="ml-2">
-                                          Complete all MCQs ({certificateEligibility.completedMcqs}/{certificateEligibility.totalMcqs})
-                                        </span>
-                                      </li>
-                                      <li className="flex items-center">
-                                        {certificateEligibility.mcqRequirementMet ? '✅' : '❌'}
-                                        <span className="ml-2">
-                                          Score 60% average ({certificateEligibility.averageScore.toFixed(1)}%)
+                                          Complete final exam
                                         </span>
                                       </li>
                                     </ul>
                                   </div>
-                                )}
+                                ) : null}
                               </div>
                             )}
                           </div>

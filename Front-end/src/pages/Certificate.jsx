@@ -104,7 +104,7 @@ const Certificate = () => {
         {/* Certificate */}
         <div 
           ref={certificateRef}
-          className="bg-white p-16 shadow-2xl"
+          className="bg-white p-8 shadow-2xl"
           style={{
             aspectRatio: '1.414',
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -124,79 +124,71 @@ const Certificate = () => {
           {/* Content */}
           <div className="relative z-10 h-full flex flex-col items-center justify-center text-center text-white">
             {/* Badge */}
-            <div className="mb-6">
+            <div className="mb-4">
               <div className="relative">
-                <div className="w-24 h-24 bg-yellow-400 rounded-full flex items-center justify-center shadow-2xl">
-                  <FaMedal className="text-6xl text-yellow-600" />
+                <div className="w-20 h-20 bg-yellow-400 rounded-full flex items-center justify-center shadow-2xl">
+                  <FaMedal className="text-5xl text-yellow-600" />
                 </div>
                 <div className="absolute -top-2 -right-2">
-                  <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center border-4 border-white">
-                    <FaCheckCircle className="text-white text-xl" />
+                  <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center border-4 border-white">
+                    <FaCheckCircle className="text-white text-sm" />
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Title */}
-            <h1 className="text-6xl font-extrabold mb-6 tracking-wide">
+            <h1 className="text-5xl font-extrabold mb-3 tracking-wide">
               CERTIFICATE
             </h1>
-            <p className="text-2xl mb-8 font-light tracking-wider">
+            <p className="text-xl mb-4 font-light tracking-wider">
               OF COMPLETION
             </p>
 
             {/* Divider */}
-            <div className="w-32 h-1 bg-yellow-400 mb-8"></div>
+            <div className="w-24 h-1 bg-yellow-400 mb-4"></div>
 
             {/* Recipient */}
-            <p className="text-xl mb-4 font-light">This is to certify that</p>
-            <h2 className="text-5xl font-bold mb-8 tracking-wide">
+            <p className="text-lg mb-2 font-light">This is to certify that</p>
+            <h2 className="text-4xl font-bold mb-4 tracking-wide">
               {certificate.learnerID?.FullName}
             </h2>
 
             {/* Course */}
-            <p className="text-xl mb-4 font-light">has successfully completed the course</p>
-            <h3 className="text-4xl font-bold mb-8 text-yellow-300">
+            <p className="text-lg mb-2 font-light">has successfully completed the course</p>
+            <h3 className="text-3xl font-bold mb-4 text-yellow-300">
               {certificate.courseID?.title}
             </h3>
 
             {/* Performance */}
-            <div className="flex items-center gap-8 mb-8">
+            <div className="flex items-center gap-6 mb-4">
               <div className="flex items-center gap-2">
-                <FaStar className="text-yellow-400 text-2xl" />
+                <FaStar className="text-yellow-400 text-xl" />
                 <div className="text-left">
-                  <p className="text-sm font-light">Average Score</p>
-                  <p className="text-3xl font-bold">{certificate.averageScore.toFixed(1)}%</p>
-                </div>
-              </div>
-              <div className="w-px h-16 bg-white opacity-30"></div>
-              <div className="flex items-center gap-2">
-                <FaCertificate className="text-yellow-400 text-2xl" />
-                <div className="text-left">
-                  <p className="text-sm font-light">Video Completion</p>
-                  <p className="text-3xl font-bold">{certificate.videoCompletionPercentage.toFixed(1)}%</p>
+                  <p className="text-xs font-light">Final Exam Score</p>
+                  <p className="text-2xl font-bold">{certificate.averageScore.toFixed(1)}%</p>
                 </div>
               </div>
             </div>
 
             {/* Instructor */}
-            <div className="mb-6">
-              <p className="text-sm font-light mb-2">Instructed by</p>
-              <p className="text-2xl font-semibold">
+            <div className="mb-3">
+              <p className="text-xs font-light mb-1">Instructed by</p>
+              <p className="text-xl font-semibold">
                 {certificate.courseID?.owner?.FullName || 'Course Instructor'}
               </p>
             </div>
 
             {/* Date and Code */}
-            <div className="flex items-center gap-8 text-sm">
+            <div className="flex items-center gap-6 text-xs">
               <div>
                 <p className="font-light">Issue Date</p>
-                <p className="font-semibold text-lg">{issueDate}</p>
+                <p className="font-semibold text-base">{issueDate}</p>
               </div>
-              <div className="w-px h-12 bg-white opacity-30"></div>
+              <div className="w-px h-10 bg-white opacity-30"></div>
               <div>
                 <p className="font-light">Certificate Code</p>
-                <p className="font-mono font-semibold text-lg tracking-wider">
+                <p className="font-mono font-semibold text-base tracking-wider">
                   {certificate.certificateCode}
                 </p>
               </div>
@@ -217,12 +209,8 @@ const Certificate = () => {
               <p className="font-semibold text-gray-900">{certificate.courseID?.title}</p>
             </div>
             <div>
-              <p className="text-gray-600">Average Score:</p>
+              <p className="text-gray-600">Final Exam Score:</p>
               <p className="font-semibold text-gray-900">{certificate.averageScore.toFixed(2)}%</p>
-            </div>
-            <div>
-              <p className="text-gray-600">Video Completion:</p>
-              <p className="font-semibold text-gray-900">{certificate.videoCompletionPercentage.toFixed(2)}%</p>
             </div>
             <div>
               <p className="text-gray-600">Issue Date:</p>
