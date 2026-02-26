@@ -42,6 +42,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     { path: '/', icon: FaHome, label: 'Home' },
     { path: '/dashboard', icon: FaChartLine, label: 'Dashboard' },
     { path: '/admin/courses', icon: FaBook, label: 'All Courses' },
+    { path: '/instructor/add-course', icon: FaPlus, label: 'Add Course' },
     { path: '/admin/approve-courses', icon: FaCheckCircle, label: 'Approve Courses' },
     { path: '/admin/approve-enrollments', icon: FaUsers, label: 'Approve Enrollments' },
     { path: '/admin/issue-certificates', icon: FaCertificate, label: 'Issue Certificates' },
@@ -64,11 +65,11 @@ const Sidebar = ({ isOpen, onClose }) => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-16 left-0 h-[calc(100vh-4rem)] bg-gradient-to-b from-primary-600 to-primary-800 text-white w-64 transform transition-transform duration-300 z-40 ${
+        className={`fixed top-16 left-0 h-[calc(100vh-4rem)] bg-gradient-to-b from-primary-600 to-primary-800 text-white w-64 transform transition-transform duration-300 z-40 overflow-hidden ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
       >
-        <div className="p-6">
+        <div className="p-6 h-full overflow-y-auto scrollbar-thin scrollbar-thumb-primary-400 scrollbar-track-primary-700 hover:scrollbar-thumb-primary-300">
           <div className="mb-8">
             <h3 className="text-xl font-bold">{user?.FullName}</h3>
             <p className="text-primary-200 text-sm capitalize">{user?.Role}</p>
@@ -77,7 +78,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             </p>
           </div>
 
-          <nav className="space-y-2">
+          <nav className="space-y-2 pb-4">
             {links.map((link) => {
               const Icon = link.icon;
               return (

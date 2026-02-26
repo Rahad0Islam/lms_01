@@ -323,8 +323,14 @@ const getInstructorCourses = AsynHandler(async (req, res) => {
         throw new ApiError(401, "User not authenticated");
     }
 
-    // Get all courses created by this instructor
-    const courses = await Course.find({ owner: instructorID })
+    // Get all courses created by this instructor OR by admin
+    // Instructors can manage their own courses + all admin-created courses
+    const courses = await Course.find({ 
+        $or: [
+            { owner: instructorID },
+            { owner: adminID }
+        ]
+    })
         .populate('owner', 'FullName Email ProfileImage')
         .sort({ createdAt: -1 });
 
@@ -338,7 +344,8 @@ const getInstructorCourses = AsynHandler(async (req, res) => {
             
             return {
                 ...course.toObject(),
-                totalEnrolled: enrolledCount
+                totalEnrolled: enrolledCount,
+                isAdminCourse: course.owner._id.toString() === adminID.toString()
             };
         })
     );
@@ -357,11 +364,16 @@ const getInstructorPendingEnrollments = AsynHandler(async (req, res) => {
         throw new ApiError(401, "User not authenticated");
     }
 
-    // Get all courses owned by this instructor
-    const instructorCourses = await Course.find({ owner: instructorID }).select('_id');
+    // Get all courses owned by this instructor OR by admin
+    const instructorCourses = await Course.find({ 
+        $or: [
+            { owner: instructorID },
+            { owner: adminID }
+        ]
+    }).select('_id');
     const courseIds = instructorCourses.map(course => course._id);
 
-    // Find pending enrollments for instructor's courses
+    // Find pending enrollments for instructor's courses + admin courses
     const pendingEnrollments = await Enroll.find({ 
         courseID: { $in: courseIds },
         paymentStatus: "pending" 

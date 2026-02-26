@@ -128,6 +128,13 @@ const ManageCourses = () => {
                     <h3 className="text-xl font-bold text-gray-900 mb-2">
                       {course.title}
                     </h3>
+                    {course.isAdminCourse && (
+                      <div className="mb-2">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          Admin Course - Add materials to earn
+                        </span>
+                      </div>
+                    )}
                     <p className="text-gray-600 mb-4 line-clamp-2">
                       {course.description}
                     </p>

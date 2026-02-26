@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import { transaction } from "../Utils/transaction.js";
 import { Bank } from "../Models/bank.model.js";
 import { Certificate } from "../Models/certificate.model.js";
+import { adminID } from "../constant.js";
 
 const approvedEnroll=AsynHandler(async(req,res)=>{
   
@@ -30,10 +31,13 @@ const approvedEnroll=AsynHandler(async(req,res)=>{
     }
 
     // Check if user is the course owner (instructor) or admin
+    // OR if it's an admin-created course and user is an instructor
     const isOwner = course.owner.toString() === currentUser._id.toString();
     const isAdmin = currentUser.Role === "admin";
+    const isAdminCourse = course.owner.toString() === adminID.toString();
+    const isInstructor = currentUser.Role === "instructor";
     
-    if (!isOwner && !isAdmin) {
+    if (!isOwner && !isAdmin && !(isAdminCourse && isInstructor)) {
         throw new ApiError(403, "Only the course instructor or admin can approve enrollments");
     }
 
@@ -143,6 +147,8 @@ const approvedCourse=AsynHandler(async(req,res)=>{
      teacher.balance=Number(teacher.balance)+Number(courseLanchPayment);
      const bank=new transaction(admin._id,teacher?._id,courseLanchPayment,`salary for courseLanch ${course.title}`);
      const txn=await bank.tnx();
+
+     admin.balance=Number(admin.balance)-Number(courseLanchPayment);
     
      bankCheck=await Bank.findById(txn);
      bankCheck.status="success";
@@ -151,8 +157,6 @@ const approvedCourse=AsynHandler(async(req,res)=>{
 
      }
      
-     // Deduct admin balance regardless of who owns the course
-     admin.balance=Number(admin.balance)-Number(courseLanchPayment);
      await admin.save({validateBeforeSave:false});
      
     //course update

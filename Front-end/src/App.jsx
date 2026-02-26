@@ -150,7 +150,7 @@ function App() {
       <Route
         path="/instructor/my-courses"
         element={
-          <ProtectedRoute allowedRoles={['instructor', 'admin']}>
+          <ProtectedRoute allowedRoles={['instructor']}>
             <ManageCourses />
           </ProtectedRoute>
         }
@@ -159,7 +159,7 @@ function App() {
       <Route
         path="/instructor/course/:courseId/materials"
         element={
-          <ProtectedRoute allowedRoles={['instructor', 'admin']}>
+          <ProtectedRoute allowedRoles={['instructor']}>
             <CourseMaterials />
           </ProtectedRoute>
         }

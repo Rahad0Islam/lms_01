@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import Layout from '../../components/Layout';
 import { courseAPI } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -7,6 +8,7 @@ import { FaBook, FaImage, FaMoneyBillWave, FaFileAlt } from 'react-icons/fa';
 
 const AddCourse = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState(null);
   const [formData, setFormData] = useState({
@@ -57,7 +59,12 @@ const AddCourse = () => {
     try {
       const response = await courseAPI.addCourse(data);
       toast.success('Course created successfully! Waiting for admin approval.');
-      navigate('/instructor/my-courses');
+      // Redirect based on user role
+      if (user?.Role === 'admin') {
+        navigate('/dashboard');
+      } else {
+        navigate('/instructor/my-courses');
+      }
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to create course');
     } finally {
@@ -159,8 +166,17 @@ const AddCourse = () => {
             {/* Info Box */}
             <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
               <p className="text-blue-700 text-sm">
-                <strong>Note:</strong> Your course will be pending approval. Once approved by an admin,
-                you'll receive payment and can start adding materials.
+                {user?.Role === 'admin' ? (
+                  <>
+                    <strong>Note:</strong> As an admin, courses you create will be available to all instructors. 
+                    When students enroll, you'll receive the full payment. Instructors who add materials will receive a lump sum amount.
+                  </>
+                ) : (
+                  <>
+                    <strong>Note:</strong> Your course will be pending approval. Once approved by an admin,
+                    you'll receive payment and can start adding materials.
+                  </>
+                )}
               </p>
             </div>
 
@@ -185,7 +201,7 @@ const AddCourse = () => {
               </button>
               <button
                 type="button"
-                onClick={() => navigate('/instructor/my-courses')}
+                onClick={() => navigate(user?.Role === 'admin' ? '/dashboard' : '/instructor/my-courses')}
                 className="flex-1 btn-outline"
               >
                 Cancel
